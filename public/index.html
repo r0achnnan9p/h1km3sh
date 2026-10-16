@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>H1kM3sh · 录像提取器</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="touch-controls.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="ic-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+      <symbol id="ic-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+      <symbol id="ic-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></symbol>
+      <symbol id="ic-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></symbol>
+      <symbol id="ic-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+      <symbol id="ic-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
+      <symbol id="ic-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+      <symbol id="ic-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+      <symbol id="ic-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="ic-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+      <symbol id="ic-device" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></symbol>
+      <symbol id="ic-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></symbol>
+      <symbol id="ic-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="app" id="app">
+    <!-- ===== Top bar ===== -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span class="brand-name">H1kM3sh</span>
+      </div>
+
+      <div class="topbar-controls">
+        <div class="tb-field device-field">
+          <span class="status-dot status-idle" id="statusDot" title="未连接"></span>
+          <select id="deviceSelect" class="tb-select" aria-label="设备列表">
+            <option value="">选择设备…</option>
+          </select>
+          <button id="btnAddDevice" class="icon-btn" title="新增设备" aria-label="新增设备"><svg class="ic"><use href="#ic-plus"/></svg></button>
+          <button id="btnDeleteDevice" class="icon-btn" title="删除选中设备" aria-label="删除选中设备"><svg class="ic"><use href="#ic-trash"/></svg></button>
+        </div>
+
+        <div class="tb-field">
+          <select id="channelSelect" class="tb-select" aria-label="通道" disabled>
+            <option value="">通道</option>
+          </select>
+        </div>
+
+        <div class="tb-field date-field">
+          <button id="btnPrevDay" class="icon-btn" title="前一天" aria-label="前一天"><svg class="ic"><use href="#ic-left"/></svg></button>
+          <input type="date" id="dateSelect" class="tb-date" aria-label="录像日期">
+          <button id="btnNextDay" class="icon-btn" title="后一天" aria-label="后一天"><svg class="ic"><use href="#ic-right"/></svg></button>
+          <button id="btnToday" class="ghost-btn" type="button">今天</button>
+        </div>
+
+        <button id="btnSettings" class="icon-btn" title="设置 / 缓存" aria-label="设置"><svg class="ic"><use href="#ic-settings"/></svg></button>
+      </div>
+    </header>
+
+    <!-- ===== Stage ===== -->
+    <main class="stage" id="stage">
+      <div class="stage-chip" id="stageChip" hidden>回放</div>
+
+      <div class="stage-empty" id="stageEmpty">
+        <svg class="stage-empty-icon"><use href="#ic-device"/></svg>
+        <p>连接录像机以开始</p>
+        <button id="btnEmptyAdd" class="btn btn-primary" type="button">添加设备</button>
+      </div>
+
+      <img id="previewImage" class="stage-img" alt="预览画面" hidden>
+
+      <button id="btnPlayOverlay" class="stage-play-overlay" type="button" hidden aria-label="播放">
+        <svg class="ic ic-play"><use href="#ic-play"/></svg>
+        <svg class="ic ic-pause" hidden><use href="#ic-pause"/></svg>
+      </button>
+
+      <div class="loader" id="previewLoader" hidden>
+        <span class="spinner"></span>
+        <span class="loader-text">加载中…</span>
+      </div>
+
+      <div class="preview-time-overlay" id="previewTimeOverlay" hidden></div>
+      <div class="stage-time mono" id="stageTime" hidden>--:--:--</div>
+    </main>
+
+    <!-- ===== Timeline ===== -->
+    <section class="timeline-dock">
+      <div id="timeline"></div>
+      <div class="timeline-note" id="timelineNote" hidden>当天无录像</div>
+    </section>
+
+    <!-- ===== Transport ===== -->
+    <footer class="transport">
+      <div class="transport-main">
+        <div class="readouts">
+          <label class="ro">
+            <span class="ro-label">入点</span>
+            <input type="text" id="startTime" placeholder="HH:MM:SS" aria-label="入点时间，时分秒" maxlength="8" class="ro-input mono">
+          </label>
+          <label class="ro">
+            <span class="ro-label">出点</span>
+            <input type="text" id="endTime" placeholder="HH:MM:SS" aria-label="出点时间，时分秒" maxlength="8" class="ro-input mono">
+          </label>
+          <div class="ro">
+            <span class="ro-label">时长</span>
+            <span class="ro-value mono" id="durationText">00:00:00</span>
+          </div>
+          <button id="btnPlayPause" class="icon-btn play-toggle" type="button" aria-label="播放" title="播放/暂停 (空格)">
+            <svg class="ic ic-play"><use href="#ic-play"/></svg>
+            <svg class="ic ic-pause" hidden><use href="#ic-pause"/></svg>
+          </button>
+          <div class="ro">
+            <span class="ro-label">当前</span>
+            <span class="ro-value mono" id="currentTimeText">--:--:--</span>
+          </div>
+          <span class="rec-chip" id="recInfoChip" hidden>—</span>
+        </div>
+
+        <div class="actions">
+          <select id="exportMethodSelect" class="tb-select method-select" aria-label="导出方式" title="导出方式">
+            <option value="rtspclip">快速导出</option>
+            <option value="mp4download">完整下载</option>
+          </select>
+          <button id="btnMarkIn" class="btn btn-ghost" type="button">设为入点 <kbd>[</kbd></button>
+          <button id="btnMarkOut" class="btn btn-ghost" type="button">设为出点 <kbd>]</kbd></button>
+          <button id="btnExport" class="btn btn-primary" type="button" disabled>
+            <svg class="ic"><use href="#ic-download"/></svg> 导出片段
+          </button>
+        </div>
+      </div>
+
+      <div class="export-progress" id="exportProgress" hidden>
+        <div class="ep-track"><div class="ep-fill" id="epFill"></div></div>
+        <div class="ep-meta">
+          <span id="exportStatusText">准备中…</span>
+          <span class="ep-right">
+            <span id="exportSpeedText" class="mono" hidden></span>
+            <span id="exportPercentage" class="mono">0%</span>
+            <button id="btnStopExport" class="btn btn-danger btn-sm" type="button" hidden>停止</button>
+          </span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ===== Settings drawer ===== -->
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+  <aside class="drawer" id="settingsDrawer" role="dialog" aria-modal="true" aria-label="设置与管理" aria-hidden="true" inert>
+    <div class="drawer-head">
+      <h3>设置</h3>
+      <button id="btnCloseDrawer" class="icon-btn" aria-label="关闭"><svg class="ic"><use href="#ic-x"/></svg></button>
+    </div>
+
+    <div class="drawer-tabs" role="tablist">
+      <button class="drawer-tab active" role="tab" aria-selected="true" data-tab="cache" type="button">缓存</button>
+      <button class="drawer-tab" role="tab" aria-selected="false" tabindex="-1" data-tab="outputs" type="button">成品</button>
+      <button class="drawer-tab" role="tab" aria-selected="false" tabindex="-1" data-tab="schedule" type="button">定时</button>
+    </div>
+
+    <div class="drawer-pane" data-pane="cache">
+      <div class="drawer-section">
+        <h4>缓存管理</h4>
+        <div class="cache-summary" id="cacheSummaryText">点击刷新查看缓存状态</div>
+        <div class="drawer-btn-row">
+          <button id="btnRefreshCache" class="btn btn-ghost" type="button"><svg class="ic"><use href="#ic-refresh"/></svg> 刷新</button>
+          <button id="btnClearCache" class="btn btn-ghost" type="button">清除全部</button>
+        </div>
+        <div class="cache-file-list" id="cacheFileList" hidden></div>
+      </div>
+    </div>
+
+    <div class="drawer-pane" data-pane="outputs" hidden>
+      <div class="drawer-section">
+        <h4>已导出成品</h4>
+        <div class="cache-summary" id="outputsSummaryText">点击刷新查看成品</div>
+        <div class="drawer-btn-row">
+          <button id="btnRefreshOutputs" class="btn btn-ghost" type="button"><svg class="ic"><use href="#ic-refresh"/></svg> 刷新</button>
+        </div>
+        <div class="output-file-list" id="outputFileList" hidden></div>
+      </div>
+    </div>
+
+    <div class="drawer-pane" data-pane="schedule" hidden>
+      <div class="drawer-section">
+        <h4>定时导出</h4>
+        <div class="cache-summary" id="scheduleSummaryText">每晚固定时段自动导出，改动即时生效（scheduler 每分钟重读）</div>
+        <button id="refresh-schedules" class="btn btn-ghost" type="button">刷新计划</button><div class="schedule-list" id="scheduleList"></div>
+      </div>
+    </div>
+
+    <div class="drawer-section">
+      <h4>键盘快捷键</h4>
+      <ul class="shortcut-list">
+        <li><span><kbd>Space</kbd></span><span>播放 / 暂停</span></li>
+        <li><span><kbd>←</kbd><kbd>→</kbd></span><span>微调 10 秒</span></li>
+        <li><span><kbd>↑</kbd><kbd>↓</kbd></span><span>微调 1 分钟</span></li>
+        <li><span><kbd>[</kbd></span><span>设为入点</span></li>
+        <li><span><kbd>]</kbd></span><span>设为出点</span></li>
+      </ul>
+    </div>
+  </aside>
+
+  <!-- ===== Add device dialog ===== -->
+  <div id="addDeviceDialog" class="dialog-overlay" hidden>
+    <div class="dialog-content" role="dialog" aria-modal="true" aria-labelledby="device-dialog-title">
+      <h3 id="device-dialog-title">新增设备</h3>
+      <div class="field">
+        <label for="dialogIp">设备 IP（或域名带端口）</label>
+        <input type="text" id="dialogIp" placeholder="例如 192.0.2.200">
+      </div>
+      <div class="field">
+        <label for="dialogUser">用户名</label>
+        <input type="text" id="dialogUser" placeholder="admin" value="admin">
+      </div>
+      <div class="field">
+        <label for="dialogPass">密码</label>
+        <div class="password-wrapper">
+          <input type="password" id="dialogPass" placeholder="••••••••">
+          <button type="button" class="password-toggle" id="btnDialogTogglePass" aria-label="切换密码显示">
+            <svg class="ic icon-eye"><use href="#ic-eye"/></svg>
+            <svg class="ic icon-eye-off" hidden><use href="#ic-eye-off"/></svg>
+          </button>
+        </div>
+      </div>
+      <p id="deviceDialogError" class="dialog-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="btnDialogCancel" class="btn btn-ghost" type="button">取消</button>
+        <button id="btnDialogConfirm" class="btn btn-primary" type="button">确认并连接</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
+

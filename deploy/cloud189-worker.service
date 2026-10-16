@@ -1,0 +1,22 @@
+[Unit]
+Description=摄像头 MCP 天翼云盘上传队列
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HIKVISION_DOWNLOADS_DIR=/dvr/data/hikvision-camera-mcp/downloads
+Environment=CLOUD189_BINARY=/opt/cloud189/cloudpan189-go
+Environment=HOME=/dvr/data/hikvision-camera-mcp/downloads/cloud189_work/home
+ExecStart=/usr/bin/python3 /opt/hikvision-camera-mcp/scripts/cloud189-worker.py
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/dvr/data/hikvision-camera-mcp/downloads/cloud189_work
+
+[Install]
+WantedBy=multi-user.target

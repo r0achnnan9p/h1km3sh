@@ -1,0 +1,20 @@
+{
+  "profile": "managed-uploads-v1",
+  "platform": "linux-x64",
+  "tools": {
+    "bilibili": {
+      "version": "1.2.2",
+      "filename": "biliup",
+      "url": "https://github.com/biliup/biliup/releases/download/v1.2.2/biliupR-v1.2.2-x86_64-linux.tar.xz",
+      "archiveSha256": "2d257da5131e55157d6aad82cd6f30c6fdc971bf6fcee8741fc5539fca65903a",
+      "member": "biliupR-v1.2.2-x86_64-linux/biliup"
+    },
+    "cloud189": {
+      "version": "0.7.0",
+      "filename": "cloud189",
+      "url": "https://github.com/gowsp/cloud189/releases/download/v0.7.0/cloud189_0.7.0_linux_amd64.tar.gz",
+      "archiveSha256": "2b00e76ba8077ba0f9dbf6ea7b3503ca6ec52291cd5b0e7c7a8074570a10cc83",
+      "member": "cloud189"
+    }
+  }
+}

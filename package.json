@@ -1,0 +1,42 @@
+{
+  "name": "h1km3sh",
+  "version": "0.1.0",
+  "description": "Self-hosted MediaMTX/Hikvision recording, playback, MP4 export and MCP console",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "setup:status-password": "node scripts/setup-status-password.js",
+    "build": "node scripts/build-portable.js",
+    "build:win": "node scripts/build-portable.js --target=win",
+    "build:linux": "node scripts/build-portable.js --target=linux",
+    "build:sea": "node scripts/build-sea.js",
+    "build:sea:win": "node scripts/build-sea.js --target=win",
+    "build:sea:linux": "node scripts/build-sea.js --target=linux",
+    "build:sea:mac": "node scripts/build-sea.js --target=mac",
+    "service": "node scripts/service.js",
+    "service:install": "node scripts/service.js install",
+    "service:uninstall": "node scripts/service.js uninstall",
+    "service:start": "node scripts/service.js start",
+    "service:stop": "node scripts/service.js stop",
+    "service:restart": "node scripts/service.js restart",
+    "service:status": "node scripts/service.js status",
+    "service:logs": "node scripts/service.js logs"
+  },
+  "keywords": [],
+  "author": "r0achnnan9p",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "xml2js": "^0.6.2"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "fast-check": "^4.7.0"
+  }
+}

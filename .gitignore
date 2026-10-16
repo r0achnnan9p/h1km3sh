@@ -1,0 +1,25 @@
+node_modules/
+.secrets/
+__pycache__/
+.env
+deploy/.env
+deploy/cloudflared.yml
+artifacts/
+dist/
+dist-win/
+dist-linux/
+dist-sea/
+downloads/*
+!downloads/.gitkeep
+data/
+.DS_Store
+*.log
+implementation_plan.md
+task.md
+walkthrough.md
+.kiro/
+.vscode/
+.claude/
+
+# SEA/便携包用的 node 二进制缓存
+.node-cache/

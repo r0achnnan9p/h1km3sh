@@ -1,0 +1,22 @@
+[Unit]
+Description=摄像头 MCP 哔哩哔哩投稿队列
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/hikvision-camera-mcp/.secrets/biliup-worker.env
+Environment=HOME=/dvr/data/hikvision-camera-mcp/downloads/biliup_work
+ExecStart=/usr/bin/python3 /opt/hikvision-camera-mcp/scripts/biliup-worker.py
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/dvr/data/hikvision-camera-mcp/downloads/biliup_work
+ReadWritePaths=/opt/hikvision-camera-mcp/.secrets
+
+[Install]
+WantedBy=multi-user.target

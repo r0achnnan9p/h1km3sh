@@ -1,0 +1,64 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import express from 'express';
+import { createUploadCoverStore, mountUploadCover, validateCoverImage, MAX_COVER_BYTES } from '../lib/upload-cover.js';
+import { createUploadSettingsStore, validateUploadSettings } from '../lib/console-upload-settings.js';
+import { createPublicGateway, createStatusPasswordHash } from '../lib/mcp-security.js';
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1d8AAAAASUVORK5CYII=', 'base64');
+const fixture = t => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-cover-')); t.after(() => fs.rmSync(root, { recursive: true, force: true })); return root; };
+test('cover parser accepts bounded PNG/JPEG magic and dimensions, rejects SVG and mismatched types', () => {
+  assert.deepEqual(validateCoverImage(png, 'image/png'), { type: 'image/png', width: 1, height: 1 });
+  const jpeg = Buffer.from('ffd8ffe000040000ffc00011080010002003011100021100031100ffd9', 'hex');
+  assert.equal(validateCoverImage(jpeg, 'image/jpeg').width, 32);
+  for (const [bytes, type] of [[png, 'image/jpeg'], [Buffer.from('<svg>' + 'x'.repeat(30)), 'image/png'], [Buffer.alloc(MAX_COVER_BYTES + 1), 'image/png'], [png.subarray(0, 24), 'image/png']]) assert.throws(() => validateCoverImage(bytes, type));
+  const huge = Buffer.from(png); huge.writeUInt32BE(9000, 16); assert.throws(() => validateCoverImage(huge));
+});
+test('cover store uses server-selected private atomic files and exposes no paths', t => {
+  const root = fixture(t), store = createUploadCoverStore(path.join(root, 'cover'), { fallbackFile: '' });
+  assert.deepEqual(store.status(), { present: false, source: 'missing' });
+  assert.deepEqual(store.save(png, 'image/png'), { present: true, source: 'managed' });
+  assert.deepEqual(store.read().bytes, png);
+  assert.equal(fs.statSync(store.pathForWorker()).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(path.dirname(store.pathForWorker())).mode & 0o777, 0o700);
+  assert.ok(!JSON.stringify(store.status()).includes(root));
+  assert.throws(() => store.save(Buffer.from('<svg>bad</svg>'), 'image/png'));
+  assert.deepEqual(store.read().bytes, png);
+  assert.deepEqual(fs.readdirSync(path.join(root, 'cover')).sort(), ['cover.json', 'cover.png']);
+});
+test('fixed upload settings are available without toggles, IDs remain numeric and no paths accepted', t => {
+  const root = fixture(t), store = createUploadSettingsStore(path.join(root, 'settings.json'));
+  const value = store.read();
+  for (const key of ['bilibiliEnabled', 'cloud189Enabled']) assert.equal(value[key], true);
+  const saved = store.update({ managedEnabled: true, bilibiliEnabled: true, bilibiliSeasonId: 1735361, bilibiliSectionId: 1992175 });
+  assert.equal(saved.managedEnabled, true); assert.equal(saved.cloud189Enabled, true);
+  for (const invalid of [{ bilibiliEnabled: 'true' }, { managedEnabled: 1 }, { bilibiliSeasonId: -1 }, { bilibiliSectionId: 1.2 }, { bilibiliSeasonId: Number.MAX_SAFE_INTEGER + 1 }, { bilibiliCoverPath: '/etc/passwd' }]) assert.throws(() => validateUploadSettings(invalid));
+});
+test('cover endpoints enforce authenticated gateway, Origin, CSRF, size and preparation gates', async t => {
+  const root = fixture(t), store = createUploadCoverStore(path.join(root, 'cover'), { fallbackFile: '' });
+  let prep = false;
+  const app = express(); mountUploadCover(app, { store, preparationOnly: () => prep });
+  app.get('/console/api/settings', (req, res) => res.json({ success: true }));
+  const origin = 'https://owner.example';
+  const gateway = createPublicGateway(app, { token: 'test-token-abcdefghijklmnopqrstuvwxyz', baseUrl: origin, statusPasswordHash: createStatusPasswordHash('cover-password') });
+  const server = gateway.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`, endpoint = '/console/api/settings/bilibili-cover';
+  assert.equal((await fetch(base + endpoint)).status, 401);
+  const login = await fetch(base + '/status/login', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ password: 'cover-password' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  // Use actual settings middleware to obtain the same gateway CSRF token.
+  const { CONSOLE_CONFIG_OWNER } = await import('../lib/console-config.js');
+  app.get('/console/api/config', (req, res) => res.json({ csrfToken: req[CONSOLE_CONFIG_OWNER].csrfToken }));
+  const { csrfToken } = await (await fetch(base + '/console/api/config', { headers: { cookie } })).json();
+  const put = (headers = {}, body = png) => fetch(base + endpoint, { method: 'PUT', headers: { cookie, origin, 'content-type': 'image/png', 'x-csrf-token': csrfToken, ...headers }, body });
+  assert.equal((await put({ 'x-csrf-token': '' })).status, 403);
+  assert.equal((await put({ origin: 'https://evil.example' })).status, 403);
+  assert.equal((await put()).status, 200);
+  const read = await fetch(base + endpoint, { headers: { cookie } });
+  assert.equal(read.headers.get('content-type'), 'image/png'); assert.equal(read.headers.get('cache-control'), 'no-store'); assert.deepEqual(Buffer.from(await read.arrayBuffer()), png);
+  assert.equal((await put({}, Buffer.alloc(MAX_COVER_BYTES + 1))).status, 413);
+  prep = true; assert.equal((await put()).status, 409);
+});

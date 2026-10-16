@@ -1,0 +1,69 @@
+/* Shared app controls: one presentation for mouse, keyboard and touch. */
+.control-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; min-height: 52px; padding: 12px 14px; border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-field); color: var(--text); background: var(--bg); text-align: left;
+  font-size: 16px; line-height: 1.4; overflow-wrap: anywhere;
+}
+.control-trigger:hover { border-color: var(--cyan); }
+.app-dialog {
+  width: min(560px, calc(100% - 32px)); max-height: calc(100dvh - 48px);
+  margin: auto; padding: 24px; overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--glass-edge); border-radius: var(--radius-card); background: var(--bg);
+  color: var(--text); box-shadow: var(--glass-shadow);
+}
+.app-dialog::backdrop { background: var(--bg); backdrop-filter: var(--glass-blur); }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.dialog-head h2 { margin: 0; font-size: 24px; }
+.dialog-head .icon-button { min-width: 48px; width: auto; padding: 0 12px; }
+.dialog-body { display: grid; gap: 16px; min-width: 0; }
+.dialog-description { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+/* Keep the 3px outline + 3px offset above the sticky footer background.
+   Margin is unpainted; padding alone paints over the final field focus ring. */
+.dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px; padding-top: 8px; }
+.dialog-actions > button { flex: 1; }
+.dialog-error { margin: 12px 0 0; color: var(--coral); overflow-wrap: anywhere; }
+.dialog-error:empty { display: none; }
+.dialog-body input { min-height: 52px; height: auto; padding: 12px; font-size: 16px; }
+.choice-list { display: grid; gap: 8px; }
+.choice-option { width: 100%; min-height: 56px; padding: 14px 16px; border-radius: var(--radius-field); border: 1px solid var(--glass-edge); background: var(--surface); color: var(--text); text-align: left; overflow-wrap: anywhere; }
+.choice-option[aria-pressed="true"] { background: var(--tint); border-color: var(--cyan); color: var(--accent); }
+.calendar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.calendar-heading button { min-width: 48px; font-size: 26px; }
+.calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; text-align: center; }
+.calendar-weekdays { color: var(--muted); font-size: 14px; }
+.calendar-day { min-width: 0; min-height: 48px; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--surface); font-size: 16px; }
+.calendar-day.today { border-color: var(--cyan); }
+.calendar-day.selected { background: var(--cyan); color: var(--on-accent); font-weight: 700; }
+.time-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.range-preview { margin: 0; color: var(--cyan); }
+/* Dialog buttons share the same language on the public and LAN consoles. */
+.app-dialog button { font: inherit; cursor: pointer; touch-action: manipulation; }
+.app-dialog .quiet-button, .app-dialog .primary-button, .app-dialog .danger-button { min-height: 48px; padding: 12px 18px; border: 1px solid var(--glass-edge); border-radius: var(--radius-pill); color: var(--text); background: var(--surface); }
+.app-dialog .primary-button { background: var(--accent); color: var(--on-accent); font-weight: 650; }
+.app-dialog .danger-button { background: var(--coral-tint); color: var(--coral); }
+.app-dialog button:disabled { opacity: .45; cursor: wait; }
+.app-dialog .field { display: grid; gap: 8px; margin: 0; }
+.app-dialog .field input { width: 100%; min-width: 0; border: 1px solid var(--glass-edge); border-radius: var(--radius-field); color: var(--text); background: var(--bg); }
+.app-dialog .field > span { color: var(--muted); font-size: 14px; }
+.app-dialog .icon-button { min-height: 48px; min-width: 48px; background: var(--tint); color: var(--text); border: 1px solid var(--glass-edge); border-radius: var(--radius-pill); }
+.app-dialog :focus-visible, .control-trigger:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .app-dialog { position: fixed; inset: auto 0 0; width: 100%; max-width: 100%; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 16px); margin: 0; padding: 24px 16px calc(20px + env(safe-area-inset-bottom, 0px)); border-radius: var(--radius-video) var(--radius-video) 0 0; }
+  .dialog-head h2 { font-size: 22px; }
+  .calendar-grid, .calendar-weekdays { gap: 2px; }
+  .calendar-day { min-height: 48px; }
+  .dialog-actions { position: sticky; bottom: -1px; background: var(--surface); padding-bottom: 4px; }
+  .time-fields { grid-template-columns: 1fr; }
+}
+/* Sheets use a solid fallback, with restrained optical highlights where supported. */
+.app-dialog { background: var(--surface); border-color: var(--tint); border-radius: var(--radius-video); box-shadow: var(--glass-shadow); }
+.control-trigger { border-radius: var(--radius-button); box-shadow: var(--glass-shadow); }
+.choice-option { border-radius: var(--radius-button); min-height: 60px; background: var(--tint); }
+.choice-option[aria-pressed="true"] { background: var(--tint); border-color: var(--tint); }
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .app-dialog { background: var(--glass); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); } }
+@media (max-width: 600px) { .app-dialog { border-radius: var(--radius-video) var(--radius-video) 0 0; } }
+@media (prefers-reduced-transparency: reduce) { .app-dialog { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; } .app-dialog::backdrop { backdrop-filter: none; } }
+@media (prefers-reduced-motion: reduce) { .app-dialog, .app-dialog *, .control-trigger { animation: none !important; transition: none !important; } }
+@media (max-width: 360px) { .app-dialog { padding-left: 12px; padding-right: 12px; } .calendar-grid, .calendar-weekdays { margin-left: -7px; margin-right: -7px; gap: 0; } .calendar-day { border-radius: var(--radius-tile); } }
+

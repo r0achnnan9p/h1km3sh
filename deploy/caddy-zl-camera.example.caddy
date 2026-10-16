@@ -1,0 +1,10 @@
+# 示例：导入到自己的 HTTPS 站点，替换下面的私网地址与路径。
+# Caddy 会剥离 /zl-camera 前缀；HIKCLIP_PUBLIC_BASE_URL 仍保留该前缀用于生成对外链接。
+route {
+	@zlCameraRoot path /zl-camera
+	redir @zlCameraRoot /zl-camera/ 308
+
+	handle_path /zl-camera/* {
+		reverse_proxy 192.0.2.32:30002
+	}
+}

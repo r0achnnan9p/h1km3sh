@@ -1,0 +1,10 @@
+# 替换 UUID 与域名后另存为 cloudflared.yml；Tunnel 凭据放 .secrets/tunnel.json。
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /etc/cloudflared/tunnel.json
+ingress:
+  - hostname: hik-mcp.example.com
+    path: ^/(|mcp|media-jobs/[a-f0-9-]{36}|artifacts/.*|downloads/.*|\.well-known/oauth-protected-resource(/mcp)?|\.well-known/oauth-authorization-server|oauth/(register|authorize|token)|status/(login|logout)|api/status/overview|console(\.js|\.css)|(touch-controls|playback-coverage|task-presentation|output-player)\.js|touch-controls\.css|console-icon(-v1)?\.png|site(-v1)?\.webmanifest|console/api/(config|cameras|mediamtx|dvrs(/[a-f0-9-]{36}(/(test|snapshot|channels|segments|stream))?)?|auth|bootstrap|setup|password|export(/stop)?|tasks|events|settings|cache|outputs(/([A-Za-z0-9_-]+(/stream|/recover-rename|/upload/(bilibili|cloud189))?)?)?|playback/[a-zA-Z0-9_-]{1,64}/(segments|stream))|fonts/(inter|jetbrains-mono)\.woff2)$
+    service: http://127.0.0.1:30002
+  - service: http_status:404
+
+
