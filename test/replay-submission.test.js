@@ -1,4 +1,4 @@
-import { findCoverageGap, countCoverageGaps, listCoverageGaps } from '../public/playback-coverage.js';
+import { listCoverageGaps } from '../public/playback-coverage.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -6,8 +6,10 @@ import fs from 'node:fs';
 import { iconSvg, setButtonIcon } from '../public/ui-primitives.js';
 const code = fs.readFileSync(new URL('../public/console.js', import.meta.url),'utf8');
 class Element {
-  style={}; children=[]; listeners={}; textContent=''; disabled=false; hidden=false; innerHTML=''; attrs={};
+  style={}; children=[]; listeners={}; textContent=''; disabled=false; hidden=false; attrs={};
   classes=new Set(); classList={ add: name=>this.classes.add(name), remove: name=>this.classes.delete(name), contains: name=>this.classes.has(name), toggle: (name,on)=>on?this.classes.add(name):this.classes.delete(name) };
+  get innerHTML() { return this.html || ''; }
+  set innerHTML(value) { this.html=value; this.children=[]; this.textContent=''; }
   setAttribute(key,value) { this.attrs[key]=value; }
   getAttribute(key) { return this.attrs[key]; }
   append(...items) { this.children.push(...items); }
@@ -16,7 +18,7 @@ class Element {
 }
 function harness() {
   const elements=new Map(), requests=[], navigations=[], timers=new Map(); let id=0, refreshes=0;
-  const $=key=>{if(!elements.has(key)) elements.set(key,new Element()); return elements.get(key);};
+  const $=key=>{if(['selection-gap-warning','selection-gap-count'].includes(key)) return null;if(!elements.has(key)) { const element=new Element(); element.id=key; elements.set(key,element); } return elements.get(key);};
   const state={ busy:false, playbackSource:'mediamtx', selectedCamera:'D2', date:'2026-10-01', playbackSelectionVersion:1, configRevision:'fixture-revision', inMs:10000, outMs:20000, segments:[{startMs:10000,endMs:20000}], activeTaskCount:7 };
   const document={body:{dataset:{view:'replay'}},createElement:()=>new Element()};
   const context=vm.createContext({ $,state,iconSvg,setButtonIcon,listCoverageGaps,AbortController,consoleSession:1,exportSubmission:null,pendingTaskFocus:null,document,
@@ -37,8 +39,10 @@ test('successful export stays on replay, uses original range and only explicit t
   assert.equal(h.requests[0].options.signal.aborted,false); assert.equal(h.context.pendingTaskFocus.kind,'exports'); assert.equal(h.context.pendingTaskFocus.id,'fixture-export');
   const toast=h.$('toast'); assert.equal(toast.children[1].children[1].textContent,'12:00:10 → 12:00:20');
   assert.equal(h.$('export-range').classList.contains('submitted'),true); assert.equal(h.$('export-range').attrs['aria-label'],'已提交');
+  assert.equal(h.$('export-range').children.includes('已提交'),true);
   await toast.children[2].listeners.click(); assert.deepEqual(h.navigations,['tasks']); assert.equal(h.$('task-tab-export').attrs['aria-selected'],'true');
   h.flush(); assert.equal(h.$('export-range').classList.contains('submitted'),false); assert.equal(h.$('export-range').attrs['aria-label'],'导出选中片段');
+  assert.equal(h.$('export-range').children.includes('已提交'),false);assert.equal(h.$('export-range').children.includes('导出'),true);
 });
 test('pending export prevents duplicate requests; failure preserves selection without success toast or navigation',async()=>{
   const h=harness();let reject;
@@ -62,12 +66,21 @@ test('upload success stays in library, flashes its visible trigger and links the
   await h.$('toast').children[2].listeners.click();assert.deepEqual(h.navigations,['tasks']);assert.equal(h.$('task-tab-upload').attrs['aria-selected'],'true');
 });
 
-test('export bar gap warning counts local intervals, clears stale counts and leaves server consent required',()=>{
-  const h=harness();Object.assign(h.state,{inMs:0,outMs:100,segments:[{startMs:10,endMs:20},{startMs:18,endMs:40},{startMs:60,endMs:80}],playbackSource:'mediamtx'});
-  Object.assign(h.context,{findCoverageGap,countCoverageGaps,updateBoundaryControls(){},formatClipDuration:String,dateStart:()=>0,timelineWindow:()=>({start:0,end:100,span:100}),timelinePercent:(value,start,span)=>(value-start)/span*100});
+test('editing a range updates export readiness without scanning gaps until export confirmation is needed',()=>{
+  const h=harness();let coverageReads=0;
+  Object.assign(h.state,{inMs:0,outMs:100,segments:[{startMs:10,endMs:20},{startMs:18,endMs:40},{startMs:60,endMs:80}],playbackSource:'mediamtx'});
+  Object.assign(h.context,{updateBoundaryControls(){},formatClipDuration:String,dateStart:()=>0,timelineWindow:()=>({start:0,end:100,span:100}),timelinePercent:(value,start,span)=>(value-start)/span*100,
+    listCoverageGaps:(...args)=>{coverageReads++;return listCoverageGaps(...args);}});
   vm.runInContext(code.slice(code.indexOf('function updateSelection('),code.indexOf('function clearReplay(')),h.context);
-  h.context.updateSelection();assert.equal(h.$('selection-gap-warning').hidden,false);assert.equal(h.$('selection-gap-count').textContent,'3');assert.equal(h.$('selection-gap-warning').attrs['aria-label'],'查看 3 处录像中断的时间范围');assert.equal(h.requests.length,0);assert.equal(h.$('export-range').disabled,false);
-  h.state.segments=[{startMs:0,endMs:100}];h.context.updateSelection();assert.equal(h.$('selection-gap-warning').hidden,true);assert.equal(h.$('selection-gap-count').textContent,'0');
-  h.state.segments=[];h.state.playbackSource='dvr';h.context.updateSelection();assert.equal(h.$('selection-gap-warning').hidden,true);
-  h.state.playbackSource='mediamtx';h.state.outMs=null;h.context.updateSelection();assert.equal(h.$('selection-gap-warning').hidden,true);assert.equal(h.$('export-range').disabled,true);assert.equal(h.state.activeTaskCount,7);
+  h.context.updateSelection();
+  assert.equal(coverageReads,0);assert.equal(h.requests.length,0);assert.equal(h.$('export-range').disabled,false);
+  const coverage=h.context.selectedGapCoverage();
+  assert.equal(coverageReads,1);assert.equal(coverage.missingIntervals.length,3);assert.equal(coverage.missingSeconds,0.05);
+  assert.deepEqual(Array.from(coverage.missingIntervals, interval=>interval.durationSeconds),[0.01,0.02,0.02]);
+  h.state.segments=[{startMs:0,endMs:100}];h.context.updateSelection();
+  assert.equal(coverageReads,1);assert.equal(h.$('export-range').disabled,false);
+  h.state.segments=[];h.state.playbackSource='dvr';h.context.updateSelection();
+  assert.equal(coverageReads,1);assert.equal(h.requests.length,0);
+  h.state.playbackSource='mediamtx';h.state.outMs=null;h.context.updateSelection();
+  assert.equal(coverageReads,1);assert.equal(h.$('export-range').disabled,true);assert.equal(h.state.activeTaskCount,7);
 });

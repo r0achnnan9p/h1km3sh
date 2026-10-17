@@ -262,7 +262,7 @@ test('a stationary edge press does not auto-pan until horizontal drag intent', (
 });
 test('page hiding and blur cancel active or pending gestures and never seek', () => {
   const h = harness();
-  vm.runInContext(script.slice(script.indexOf('function interruptTimelineScrub('), script.indexOf("document.addEventListener('visibilitychange'")), h.context);
+  vm.runInContext(script.slice(script.indexOf('function interruptTimelineScrub('), script.indexOf("document.addEventListener('visibilitychange'", script.indexOf('function interruptTimelineScrub('))), h.context);
   const original = h.state.timelineStartMs;
   h.context.beginTimelineScrub(event({ pointerType: 'mouse', x: 150 }), 'detail');
   h.context.moveTimelineScrub(event({ pointerType: 'mouse', x: 350 }), 'detail'); h.frame(0); h.frame(50);
@@ -272,7 +272,7 @@ test('page hiding and blur cancel active or pending gestures and never seek', ()
 });
 test('timeline retains useful tick labels and precision input without zoom menu or duplicate help', async () => {
   const { statusDashboardPage } = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
-  for (const id of ['timeline-start-label', 'timeline-middle-label', 'timeline-end-label', 'edit-range']) assert.ok(html.includes(`id="${id}"`));
+  for (const id of ['timeline-start-label', 'timeline-middle-label', 'timeline-end-label', 'edit-in', 'edit-out']) assert.ok(html.includes(`id="${id}"`));
   for (const spanSeconds of [30, 300, 3600, 86400]) assert.ok(html.includes(`data-timeline-span="${spanSeconds}"`));
   for (const copy of ['timeline-window-label', '导出会在后台继续']) assert.ok(!html.includes(copy));
   for (const copy of ['先选择开始和结束时间。', '在时间轴定位，或播放到目标画面']) assert.ok(!script.includes(copy));

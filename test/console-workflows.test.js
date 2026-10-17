@@ -28,7 +28,10 @@ test('mark buttons sample actual video currentTime and reject an inverted endpoi
 test('page headings provide context without redundant workspace or player headers', async () => {
   const {statusDashboardPage} = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
   assert.doesNotMatch(html, /workspace-header|workspace-breadcrumb|workspace-status|current-view-title|video-heading|player-source-label|录像预览/);
-  assert.match(html, /id="player-wrap"[\s\S]*id="go-live"[\s\S]*class="player-transport"/);
+  const canvas = html.slice(html.indexOf('id="player-wrap"'), html.indexOf('id="replay-control-panel"'));
+  assert.doesNotMatch(canvas, /id="(?:go-live|playback-mute|replay-fullscreen)"/);
+  assert.match(canvas, /id="playback-toggle"[^>]*hidden inert/);
+  assert.match(html, /id="replay-control-panel"[\s\S]*id="replay-transport"[\s\S]*class="replay-media-tools"[\s\S]*id="go-live"/);
   assert.doesNotMatch(html, /video-tags|video-channel-label|video-date-label/);
   assert.doesNotMatch(html, /class="top-actions"|class="live-label"/);
   assert.equal((html.match(/id="logout"/g)||[]).length,1);
@@ -38,6 +41,7 @@ test('page headings provide context without redundant workspace or player header
   assert.doesNotMatch(html, /私人录像|受保护的私人空间|回放 · 剪辑 · 归档|录像时间以北京时间显示/);
   const reloads = [...html.matchAll(/<button[^>]*data-app-reload[^>]*>/g)];
   assert.equal(reloads.length, 4);
+  assert.equal(new Set(reloads.map(([button]) => button)).size, 1, 'all four headers render the same reload component');
   for (const [button] of reloads) assert.match(button, /aria-label="重新加载应用" title="重新加载应用"/);
   assert.doesNotMatch(html, /id="refresh-(?:outputs|tasks|settings)"/);
   for(const id of ['boot-retry','login-form','settings-open-dvr','settings-open-mediamtx','clear-cache','connection-banner']) assert.ok(html.includes(`id="${id}"`));
@@ -94,21 +98,22 @@ test('cover previews respect the gateway image CSP and account errors preserve e
   assert.match(script, /error\.code = data\?\.code \|\| data\?\.errorCode/);
 });
 
-test('narrow screens hide redundant page titles while retaining headings, essential selectors and alerts', async () => {
+test('narrow replay keeps one product heading and visible selectors while other tabs retain their headings', async () => {
   const css = fs.readFileSync(new URL('../public/console.css', import.meta.url), 'utf8');
-  const compact = css.slice(css.indexOf('/* Narrow screens use the bottom tabs'));
-  assert.match(compact, /@media \(max-width: 760px\)/);
   assert.doesNotMatch(css, /workspace-header/);
-  assert.match(compact, /\.page-heading \{ display: block; min-height: 0; margin: 0; padding: 0/);
-  assert.match(compact, /\.page-heading > \.replay-title \{[^}]*position: absolute; width: 1px; height: 1px/);
-  assert.match(compact, /clip: rect\(0, 0, 0, 0\)/);
-  assert.doesNotMatch(compact, /\.page-heading > div \{[^}]*display: none/);
-  assert.match(compact, /\.replay-heading \.playback-context \{ min-height: 44px; width: 100%/);
-  assert.doesNotMatch(compact, /grid-template-columns: auto minmax/);
+  assert.match(css, /\.precision-layout #view-replay\.focus-replay \.replay-topbar \{[^}]*display:flex/);
+  assert.match(css, /\.precision-layout #view-replay\.focus-replay \.playback-quick-controls \{[^}]*display:grid/);
   const { statusDashboardPage } = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
-  for (const heading of ['回放', '成片', '任务', '设置']) assert.ok(html.includes(`<h1>${heading}</h1>`));
+  assert.match(html, /<header[^>]*id="app-title"[^>]*><span>H1kM3sh<\/span>/);
+  assert.doesNotMatch(html, /<h1>回放<\/h1>/);
+  for (const heading of ['成片', '任务', '设置']) assert.ok(html.includes(`<h1>${heading}</h1>`));
+  const topbar = html.slice(html.indexOf('class="page-heading replay-heading replay-topbar"'), html.indexOf('class="legacy-replay-toolbar"'));
+  for (const id of ['quick-source-select', 'quick-camera-select', 'playback-context']) {
+    const opening = topbar.match(new RegExp(`<[^>]+id="${id}"[^>]*>`))?.[0];
+    assert.ok(opening, id + ' stays in the visible top bar'); assert.doesNotMatch(opening, /\bhidden\b/);
+  }
   assert.match(html, /id="connection-banner" role="status"/);
-  assert.match(html, /id="playback-context"/);
+  assert.match(html, /id="playback-notice" aria-live="polite"/);
 });
 
 test('upload setup shortcuts open the selected platform detail directly without changing settings drafts', async () => {
