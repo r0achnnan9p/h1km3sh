@@ -18,19 +18,26 @@ function coverageRanges(segments, startMs, endMs) {
     const start = Number.isFinite(segment.startMs) ? segment.startMs : Date.parse(segment.start);
     const end = Number.isFinite(segment.endMs) ? segment.endMs : start + Number(segment.duration) * 1000;
     return { start, end };
-  }).filter(range => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > startMs && range.start < endMs)
+  }).filter(range => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start && range.end > startMs && range.start < endMs)
     .sort((left, right) => left.start - right.start);
 }
 
-/** Count disjoint missing intervals for the local export warning; server consent stays authoritative. */
-export function countCoverageGaps(segments, startMs, endMs) {
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
-  let coveredUntil = startMs, count = 0;
+/** List every disjoint missing interval, clipped to the selected range. */
+export function listCoverageGaps(segments, startMs, endMs) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return [];
+  let coveredUntil = startMs;
+  const missing = [];
   for (const range of coverageRanges(segments, startMs, endMs)) {
     if (range.end <= coveredUntil || range.end <= range.start) continue;
-    if (range.start > coveredUntil) count++;
+    if (range.start > coveredUntil) missing.push({ start: coveredUntil, end: Math.min(endMs, range.start) });
     coveredUntil = Math.max(coveredUntil, range.end);
-    if (coveredUntil >= endMs) return count;
+    if (coveredUntil >= endMs) return missing;
   }
-  return count + (coveredUntil < endMs ? 1 : 0);
+  if (coveredUntil < endMs) missing.push({ start: coveredUntil, end: endMs });
+  return missing;
+}
+
+/** Count disjoint missing intervals; server consent stays authoritative. */
+export function countCoverageGaps(segments, startMs, endMs) {
+  return listCoverageGaps(segments, startMs, endMs).length;
 }

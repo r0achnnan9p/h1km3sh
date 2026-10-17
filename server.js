@@ -1599,14 +1599,20 @@ app.get('/console/api/dvrs/:id/live', preparationGuard, async (req, res) => {
   if (!session.finished) activePreview = session;
 });
 app.post('/console/api/export', async (req, res) => {
+  const controller = new AbortController(), disconnected = () => { if (!res.writableEnded) controller.abort(); };
+  req.once('aborted', disconnected); res.once('close', disconnected);
   try {
-    const job = prepareConsoleExport(req.body, { ...cameraJobDependencies(), getDevice: getConsoleDvr });
-    job.initialPlan = await job.plan({});
+    const job = prepareConsoleExport(req.body, { ...cameraJobDependencies(), getDevice: getConsoleDvr, playback: mediaPlayback });
+    job.initialPlan = await (job.preflight || job.plan)({ signal: controller.signal });
+    if (controller.signal.aborted || res.destroyed) return;
     if (job.recoveryRequest) job.recoveryRequest.plan = job.initialPlan;
     const result = startExportTask({ [CAMERA_JOB]: job });
     res.status(result.ok ? 202 : result.status).json({ ...result, success: result.ok,
       status: result.reused ? 'completed' : activeTasks.get(result.taskId)?.status });
-  } catch (error) { res.status(error.code === 'MEDIAMTX_GAPS' ? 409 : error.code === 'MEDIAMTX_EMPTY' ? 422 : 400).json({ success: false, error: error.message, ...(error.coverage ? { code: error.code, coverage: error.coverage } : {}) }); }
+  } catch (error) {
+    if (!controller.signal.aborted && !res.destroyed) res.status(error.code === 'MEDIAMTX_GAPS' ? 409 : error.code === 'MEDIAMTX_EMPTY' ? 422 : [502, 504].includes(error.status) ? error.status : 400)
+      .json({ success: false, error: error.message, ...(error.coverage ? { code: error.code, coverage: error.coverage } : {}) });
+  } finally { req.removeListener('aborted', disconnected); res.removeListener('close', disconnected); }
 });
 app.get('/console/api/cache', (req, res) => {
   try {

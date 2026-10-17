@@ -36,7 +36,10 @@ test('page headings provide context without redundant workspace or player header
   assert.ok(!html.includes('id="connection"'));
   assert.ok(!html.includes('workspace-footer'));
   assert.doesNotMatch(html, /私人录像|受保护的私人空间|回放 · 剪辑 · 归档|录像时间以北京时间显示/);
-  assert.match(html, /<button[^>]+id="refresh-outputs"[^>]+aria-label="刷新成片"/);
+  const reloads = [...html.matchAll(/<button[^>]*data-app-reload[^>]*>/g)];
+  assert.equal(reloads.length, 4);
+  for (const [button] of reloads) assert.match(button, /aria-label="重新加载应用" title="重新加载应用"/);
+  assert.doesNotMatch(html, /id="refresh-(?:outputs|tasks|settings)"/);
   for(const id of ['boot-retry','login-form','settings-open-dvr','settings-open-mediamtx','clear-cache','connection-banner']) assert.ok(html.includes(`id="${id}"`));
 });
 

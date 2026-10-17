@@ -339,7 +339,7 @@ test('transport HTML supplies Chinese accessible labels, icon visuals and 44px t
   const html = statusDashboardPage();
   const expected = new Map([
     ['go-live', '回到直播'], ['playback-toggle', '播放'], ['playback-mute', '开启声音'],
-    ['skip-back', '后退 10 秒'], ['skip-forward', '前进 10 秒'],
+    ['skip-back', '后退 10 秒，长按连续后退'], ['skip-forward', '前进 10 秒，长按连续前进'],
   ]);
   for (const [id, label] of expected) {
     const button = html.match(new RegExp(`<button\\b[^>]*\\bid="${id}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0];

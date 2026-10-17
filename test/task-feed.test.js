@@ -42,7 +42,7 @@ class Element {
  insertBefore(node,next){if(node.parent)node.remove();const i=next?this.children.indexOf(next):-1;if(i<0)this.children.push(node);else this.children.splice(i,0,node);node.parent=this;}
  remove(){if(this.parent){const a=this.parent.children;a.splice(a.indexOf(this),1);this.parent=null;}}
  removeChild(node){node.remove();}
- addEventListener(name,fn){this.events[name]=fn;}
+ addEventListener(name,fn){const previous=this.events[name];this.events[name]=previous?event=>{previous(event);fn(event);}:fn;}
  setAttribute(){}
  contains(){return false;}
  querySelectorAll(){return [];}
@@ -103,4 +103,64 @@ test('archiving visible unknown tasks skips closed details anchors without expan
  feed.loadMore();assert.equal(feed.loadedCount,50);assert.deepEqual(card('t5').getClientRects(),[]);
  scroller.scrollTop=320;scroller.events.scroll();const secondOffset=offset('t7');tasks=tasks.map(t=>t.id==='t6'?{...t,archivedAt:1800000002000}:t);feed.update(tasks);assert.equal(offset('t7'),secondOffset);assert.deepEqual(card('t6').getBoundingClientRect(),{top:0,bottom:0});
  tasks=tasks.map(t=>({...t,archivedAt:1800000003000}));feed.update(tasks);assert.equal(scroller.scrollTop,0);
+});
+
+
+function revealHarness(items) {
+ const doc={createElement:tag=>Object.assign(new LayoutElement(),{tag}),activeElement:null};
+ const list=new LayoutElement(),scroller=new LayoutElement(),sentinel=new LayoutElement();
+ scroller.isScroller=true;list.scroller=scroller;scroller.clientHeight=300;
+ Object.defineProperty(scroller,'scrollHeight',{get:()=>list.children.reduce((sum,e)=>sum+e.height,0)+44});
+ const feed=createTaskFeed({list,scroller,sentinel,document:doc,createdAt:t=>t.createdAt,makeCard:t=>{
+  const card=new LayoutElement();card.className=t.status==='downloading'?'working':'history';card.textContent=t.id||t.taskId;return card;
+ }});
+ feed.update(items);
+ const card=id=>list.querySelectorAll('[data-task-id]').find(e=>e.dataset.taskId===id);
+ const offset=id=>card(id).getBoundingClientRect().top-scroller.getBoundingClientRect().top;
+ const anchor=()=>list.querySelectorAll('[data-task-id]').find(e=>e.getBoundingClientRect().bottom>scroller.getBoundingClientRect().top);
+ return {feed,list,scroller,sentinel,card,offset,anchor};
+}
+
+test('explicit task reveal waits for visible data and survives late SSE without retaining the old scroll anchor',async()=>{
+ let items=Array.from({length:85},(_,i)=>({id:'history-'+i,status:'completed',createdAt:1800000000000-i*1000}));
+ const h=revealHarness(items);h.feed.loadMore();h.feed.loadMore();h.scroller.scrollTop=900;h.scroller.events.scroll();
+ const oldId=h.anchor().dataset.taskId,oldOffset=h.offset(oldId),oldCard=h.card(oldId);
+ assert.equal(h.feed.reveal('submitted'),false,'an API acknowledgement can precede the task snapshot');
+ assert.equal(h.scroller.scrollTop,900);assert.equal(h.feed.loadedCount,60);
+ h.scroller.hidden=true;h.scroller.scrollTop=0;
+ await Promise.resolve().then(()=>{items=[{id:'submitted',status:'queued',createdAt:1800000001000},...items];h.feed.update(items);});
+ assert.equal(h.feed.reveal('submitted'),false,'a hidden tab must retain the pending reveal');
+ h.scroller.hidden=false;h.feed.resume();assert.equal(h.offset(oldId),oldOffset);
+ assert.equal(h.feed.reveal('submitted'),true);assert.equal(h.offset('submitted'),0);assert.equal(h.feed.loadedCount,60);
+ assert.equal(h.card(oldId),oldCard,'revealing does not rebuild existing task roots');
+ await Promise.resolve().then(()=>{items=[{id:'attention',status:'unknown',createdAt:1800000002000},...items];h.feed.update(items);});
+ assert.equal(h.offset('submitted'),0,'late SSE must preserve the new task anchor instead of restoring history');
+ h.scroller.hidden=true;h.scroller.scrollTop=0;await Promise.resolve().then(()=>h.feed.update(items));
+ h.scroller.hidden=false;h.feed.resume();assert.equal(h.offset('submitted'),0);
+ h.scroller.scrollTop=600;h.scroller.events.scroll();const nextId=h.anchor().dataset.taskId,nextOffset=h.offset(nextId);
+ await Promise.resolve().then(()=>{items=[{id:'later',status:'queued',createdAt:1800000003000},...items];h.feed.update(items);});
+ assert.equal(h.offset(nextId),nextOffset,'later user browsing keeps ordinary SSE anchor behavior');
+ assert.ok(h.offset('submitted')<0,'the one-shot reveal does not keep pulling the user back');
+});
+
+test('revealing a reused historical task loads through its card without discarding already loaded history',()=>{
+ const items=Array.from({length:85},(_,i)=>({id:'history-'+i,status:'completed',createdAt:1800000000000-i*1000}));
+ const h=revealHarness(items);h.feed.loadMore();const retained=h.card('history-4');
+ assert.equal(h.card('history-70'),undefined);
+ assert.equal(h.feed.reveal('history-70'),true);assert.equal(h.feed.loadedCount,80);
+ assert.equal(h.offset('history-70'),0);assert.equal(h.card('history-4'),retained);assert.equal(h.sentinel.hidden,false);
+ assert.equal(h.feed.reveal('history-0'),true);assert.equal(h.feed.loadedCount,80);assert.equal(h.offset('history-0'),0);
+ const scroll=h.scroller.scrollTop;assert.equal(h.feed.reveal('missing'),false);assert.equal(h.scroller.scrollTop,scroll);assert.equal(h.feed.loadedCount,80);
+});
+
+test('explicit archived-task reveal expands its group and clamps scrolling so the card remains visible',()=>{
+ const items=Array.from({length:44},(_,i)=>({id:'history-'+i,status:'completed',createdAt:1800000000000-i*1000}));
+ items.push({taskId:'archived-target',status:'completed',archivedAt:1800000001000,createdAt:1799999000000});
+ const h=revealHarness(items);
+ assert.equal(h.feed.reveal('archived-target'),true);assert.equal(h.feed.loadedCount,45);
+ assert.equal(h.card('archived-target').parent.tag,'details');assert.equal(h.card('archived-target').parent.open,true);
+ const bounds=h.scroller.getBoundingClientRect(),rect=h.card('archived-target').getBoundingClientRect();
+ assert.ok(rect.top>=bounds.top);assert.ok(rect.bottom<=bounds.bottom-44,'card stays above the bottom fade');
+ assert.equal(h.scroller.scrollTop,h.scroller.scrollHeight-h.scroller.clientHeight);
+ h.feed.update(items);assert.equal(h.card('archived-target').parent.open,true);
 });

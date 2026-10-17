@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
+import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,12 +13,26 @@ import { ffmpegPath, ffprobePath } from '../lib/ffmpeg-paths.js';
 
 test('真实 HTTP MCP：目录、截图、拼图、视频、下载、并发守卫与取消', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'camera-runtime-test-'));
-  let child;
+  let child, playbackServer;
   try {
     const recorder = path.join(directory, 'archive', 'd1');
     fs.mkdirSync(recorder, { recursive: true });
     await runMedia(ffmpegPath, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=320x180:r=10', '-t', '8',
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(recorder, '2026-09-24_20-00-00-000000.mp4')]);
+    const catalog = new Map([['d1', [{ start: '2026-09-24T12:00:00.000Z', duration: 8 }]]]);
+    const playbackRequests = [];
+    playbackServer = http.createServer((req, res) => {
+      const url = new URL(req.url, 'http://catalog.example.test');
+      if (url.pathname !== '/list' || !catalog.has(url.searchParams.get('path'))) { res.writeHead(404); res.end(); return; }
+      const start = Date.parse(url.searchParams.get('start')), end = Date.parse(url.searchParams.get('end'));
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) { res.writeHead(400); res.end(); return; }
+      playbackRequests.push({ path: url.searchParams.get('path'), start, end });
+      // Playback /list returns intersecting catalog intervals in absolute time;
+      // the adapter must clip them to the requested wall-clock selection.
+      const rows = catalog.get(url.searchParams.get('path')).filter(row => Date.parse(row.start) < end && Date.parse(row.start) + row.duration * 1000 > start);
+      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(rows));
+    });
+    playbackServer.listen(0, '127.0.0.1'); await once(playbackServer, 'listening');
     const listener = net.createServer();
     listener.listen(0, '127.0.0.1'); await once(listener, 'listening');
     const port = listener.address().port; await new Promise((resolve) => listener.close(resolve));
@@ -25,7 +40,7 @@ test('真实 HTTP MCP：目录、截图、拼图、视频、下载、并发守�
       env: { ...process.env, PORT: String(port), NODE_TEST: '1', HIKCLIP_BIND: '127.0.0.1', HIKCLIP_PORT_FALLBACK: '0',
         HIKCLIP_SCHEDULER_ENABLED: '0', HIKCLIP_PREPARATION_ONLY: '0', HIKVISION_DATA_DIR: path.join(directory, 'data'),
         HIKVISION_RUNTIME_FILE: path.join(directory, 'runtime.json'), HIKVISION_DOWNLOADS_DIR: path.join(directory, 'downloads'), HIKVISION_ARCHIVE_DIR: path.join(directory, 'archive'),
-        HIKVISION_MEDIAMTX_API_URL: '', HIKVISION_MEDIAMTX_PLAYBACK_URL: 'http://127.0.0.1:0', HIKVISION_BILIUP_ENABLED: '0',
+        HIKVISION_MEDIAMTX_API_URL: '', HIKVISION_MEDIAMTX_PLAYBACK_URL: `http://127.0.0.1:${playbackServer.address().port}`, HIKVISION_BILIUP_ENABLED: '0',
         HIKVISION_ARTIFACT_DIR: path.join(directory, 'artifacts'), HIKCLIP_MCP_TOKEN: '', HIKCLIP_MCP_TOKEN_FILE: '',
         HIKCLIP_STATUS_PASSWORD_HASH: '', HIKCLIP_LOGIN_PASSWORD: '', HIKCLIP_BASE_URL: '',
         HIKCLIP_PUBLIC_BASE_URL: '', HIKCLIP_PUBLIC_PORT: '', HIKCLIP_PUBLIC_BIND: '127.0.0.1' }, stdio: 'ignore' });
@@ -90,11 +105,17 @@ test('真实 HTTP MCP：目录、截图、拼图、视频、下载、并发守�
     fs.writeFileSync(path.join(directory, 'data', 'cameras.json'), JSON.stringify({ cameras: [
       { id: 'gap', name: '缺口镜头', deviceId: added.device.id, channel: '201', archivePath: 'gaps' },
     ] }));
+    catalog.set('gaps', [
+      { start: '2026-09-24T13:00:00.000Z', duration: 2 },
+      { start: '2026-09-24T13:00:08.000Z', duration: 2 },
+    ]);
     const gapRequest = { source: 'mediamtx', camera: 'gap', start: '2026-09-24 21:00:00', end: '2026-09-24 21:00:10' };
     const before = (await request('/api/status')).payload.activeTasks.length;
     const blocked = await request('/console/api/export', gapRequest);
     assert.equal(blocked.status, 409); assert.equal(blocked.payload.code, 'MEDIAMTX_GAPS');
     assert.equal(blocked.payload.coverage.missingSeconds, 6); assert.equal(blocked.payload.coverage.availableSeconds, 4);
+    assert.deepEqual(blocked.payload.coverage.missingIntervals.map(({ start, end }) => [start, end]), [['2026-09-24 21:00:02', '2026-09-24 21:00:08']]);
+    assert.deepEqual(playbackRequests.at(-1), { path: 'gaps', start: Date.parse('2026-09-24T13:00:00Z'), end: Date.parse('2026-09-24T13:00:10Z') });
     assert.equal((await request('/api/status')).payload.activeTasks.length, before, 'unaccepted gaps must not enqueue anything');
     const accepted = await request('/console/api/export', { ...gapRequest, acceptGaps: true }); assert.equal(accepted.status, 202);
     const gapTask = await completed(accepted.payload.taskId); assert.equal(gapTask.status, 'completed');
@@ -111,6 +132,7 @@ test('真实 HTTP MCP：目录、截图、拼图、视频、下载、并发守�
 
   } finally {
     if (child && child.exitCode === null) { const stopped = once(child, 'exit'); child.kill(); await stopped; }
+    if (playbackServer) { const closed = new Promise(resolve => playbackServer.close(resolve)); playbackServer.closeAllConnections(); await closed; }
     assert.equal(path.dirname(directory), os.tmpdir());
     assert.ok(path.basename(directory).startsWith('camera-runtime-test-'));
     fs.rmSync(directory, { recursive: true, force: true });

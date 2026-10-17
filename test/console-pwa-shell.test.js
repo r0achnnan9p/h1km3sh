@@ -13,8 +13,11 @@ test('PWA zoom fallback cancels native zoom gestures without intercepting pointe
 test('navigation badge follows server active tasks and hides after completion, excluding errors, drafts and archived uploads', () => {
   const badges = [{}, {}], lists = { 'task-list': { replaceChildren() {}, append() {} }, 'upload-list': { replaceChildren() {}, append() {} } };
   const state = { tasks: [{ status: 'queued' }, { status: 'downloading' }, { status: 'error' }, { status: 'completed' }], uploads: [{ status: 'uploading' }, { status: 'draft' }, { status: 'unknown' }, { status: 'uploading', archivedAt: 1 }] };
-  const context = { state, $: id => lists[id] || (lists[id] = {}), document: { querySelectorAll: () => badges, createElement: () => ({}) }, taskFeeds: { exports: { update() {} }, uploads: { update() {} } } };
-  vm.createContext(context); vm.runInContext(script.slice(script.indexOf('function renderTasks()'), script.indexOf('// Explicit retry')), context);
+  const context = { state, pendingTaskFocus: null, $: id => lists[id] || (lists[id] = {}), document: { querySelectorAll: () => badges, createElement: () => ({}) }, taskFeeds: { exports: { update() {} }, uploads: { update() {} } } };
+  // Counter-only snapshots have no locally submitted task to reveal.
+  vm.createContext(context);
+  vm.runInContext(script.slice(script.indexOf('function revealSubmittedTask('), script.indexOf('function openTaskPage(')), context);
+  vm.runInContext(script.slice(script.indexOf('function renderTasks()'), script.indexOf('// Explicit retry')), context);
   context.renderTasks(); for (const node of badges) { assert.equal(node.textContent, '3'); assert.equal(node.hidden, false); }
   state.tasks = []; state.uploads = []; context.renderTasks(); for (const node of badges) { assert.equal(node.textContent, '0'); assert.equal(node.hidden, true); }
 });
@@ -50,8 +53,11 @@ test('bottom navigation has four named icon buttons and one server-derived task 
 test('authoritative count survives truncated history and becomes hidden when server reports zero', () => {
   const badge = {}, state = { activeTaskCount: 51, tasks: [{ status: 'completed' }], uploads: [] };
   const list = { replaceChildren() {}, append() {} };
-  const context = { state, $: () => list, document: { querySelectorAll: () => [badge], createElement: () => ({}) }, taskFeeds: { exports: { update() {} }, uploads: { update() {} } } };
-  vm.createContext(context); vm.runInContext(script.slice(script.indexOf('function renderTasks()'), script.indexOf('// Explicit retry')), context);
+  const context = { state, pendingTaskFocus: null, $: () => list, document: { querySelectorAll: () => [badge], createElement: () => ({}) }, taskFeeds: { exports: { update() {} }, uploads: { update() {} } } };
+  // Counter-only snapshots have no locally submitted task to reveal.
+  vm.createContext(context);
+  vm.runInContext(script.slice(script.indexOf('function revealSubmittedTask('), script.indexOf('function openTaskPage(')), context);
+  vm.runInContext(script.slice(script.indexOf('function renderTasks()'), script.indexOf('// Explicit retry')), context);
   context.renderTasks(); assert.equal(badge.textContent, '51'); assert.equal(badge.hidden, false);
   state.activeTaskCount = 0; context.renderTasks(); assert.equal(badge.textContent, '0'); assert.equal(badge.hidden, true);
 });

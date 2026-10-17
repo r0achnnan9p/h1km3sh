@@ -6,7 +6,8 @@ import { createOutputPlayers } from './output-player.js';
 import { activeDialog, openDialog, labelledInput, normalizeMp4Name, rangeTimeMs, openCalendar, enhanceTimeInput } from './touch-controls.js';
 import { setupDebugMark } from './debug-mark.js';
 import { startMediaMtxLive } from './mediamtx-live-player.js';
-import { findCoverageGap, countCoverageGaps } from './playback-coverage.js';
+import { findCoverageGap, countCoverageGaps, listCoverageGaps } from './playback-coverage.js';
+import { bindPressRepeat } from './press-repeat.js';
 import { taskProgressPresentation, taskStageLabel, taskProgressCaption, uploadProgressCaption, createTaskFeed, createCollectionFeed, createTransferSampler, fmtBps, formatTransferBytes, formatEta } from './task-presentation.js';
 
 // iOS may ignore viewport scale limits; cancel only browser page-zoom gestures.
@@ -60,6 +61,8 @@ let outputFeed = null, outputFilter = null, outputDetail = null;
 let outputRequest = 0, stateRequest = 0, consoleSession = 0;
 let settingsInline = null;
 let precisionTimeline = null;
+let pendingTaskFocus = null, exportSubmission = null;
+const replayHoldButtons = [];
 const cloudVerificationPending = new Set();
 const dvrHttpSamplePending = new Map();
 const uploadAccounts = createUploadAccounts({ request: requestJson, resolveUrl: appPath, openDialog, onConnected: refreshSettingsAfterAccountChange, onNotice: notify, onReauthenticate: reauthenticateForUploads });
@@ -81,7 +84,7 @@ function notify(message, isError = false, submission = null) {
     const caption = document.createElement('span'); caption.textContent = message;
     const range = document.createElement('span'); range.className = 'mono'; range.textContent = submission.range;
     text.append(caption, range);
-    const arrow = document.createElement('button'); arrow.type = 'button'; arrow.className = 'toast-task-link'; setButtonIcon(arrow, 'chevron', '查看任务'); arrow.addEventListener('click', () => { clearTimeout(toastTimer); node.classList.remove('show'); node.hidden = true; navigate('tasks'); });
+    const arrow = document.createElement('button'); arrow.type = 'button'; arrow.className = 'toast-task-link'; setButtonIcon(arrow, 'chevron', '查看任务'); arrow.addEventListener('click', () => { clearTimeout(toastTimer); node.classList.remove('show'); node.hidden = true; openTaskPage(submission.kind); });
     const countdown = document.createElement('span'); countdown.className = 'toast-countdown'; countdown.setAttribute('aria-hidden', 'true');
     node.append(icon, text, arrow, countdown);
   }
@@ -140,6 +143,7 @@ function setAuthMode(configured) {
   $('auth-copy').textContent = configured ? '查看回放、管理成片与上传任务。' : '先用服务器生成的一次性初始化码设置短密码。';
 }
 function loggedOut(message = '') {
+  cancelExportSubmission(true); cancelReplayHold(); pendingTaskFocus = null;
   interruptTimelineScrub();
   if (state.mediaLive || state.lastFramePending || state.previewMode === 'last-frame') clearReplay();
   if (typeof uploadAccounts !== 'undefined') void uploadAccounts.stop();
@@ -225,7 +229,11 @@ function navigate(view, updateHistory = true) {
     if (view !== 'library') outputPlayers.pauseAll();
     activeDialog?.close();
     document.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.panel === view));
-    if (view === 'tasks' && typeof taskFeeds !== 'undefined') ($('task-upload-panel').hidden ? taskFeeds.exports : taskFeeds.uploads).resume();
+    if (view === 'tasks' && typeof taskFeeds !== 'undefined') {
+      if (pendingTaskFocus) selectTaskTab(pendingTaskFocus.kind === 'uploads');
+      else ($('task-upload-panel').hidden ? taskFeeds.exports : taskFeeds.uploads).resume();
+      revealSubmittedTask();
+    }
     document.querySelectorAll('[data-view]').forEach(button => { button.classList.toggle('active', button.dataset.view === view); button.setAttribute('aria-current', button.dataset.view === view ? 'page' : 'false'); });
     if (changedView) { window.scrollTo(0, 0); const scrollRoot = document.querySelector('.workspace-main'); if (scrollRoot) scrollRoot.scrollTop = 0; }
     if (typeof slidingNavigation !== 'undefined') slidingNavigation?.sync();
@@ -250,7 +258,7 @@ function navigate(view, updateHistory = true) {
 
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
 const slidingNavigation = createSlidingNavigation({ nav: document.querySelector('.mobile-nav'), activate: view => navigate(view) });
-const playbackChrome = createPlaybackChrome({ container: $('player-wrap'), video: $('replay-player'), interactionRoot: $('view-replay'), isBusy: () => state.dragging || state.busy || Boolean(activeDialog?.open) });
+const playbackChrome = createPlaybackChrome({ container: $('player-wrap'), video: $('replay-player'), interactionRoot: $('view-replay'), isBusy: () => state.dragging || Boolean(state.holdSeek) || state.busy || Boolean(activeDialog?.open) });
 document.querySelector('.skip-link')?.addEventListener('click', event => { event.preventDefault(); $('workspace-content').focus(); });
 window.addEventListener('popstate', () => { if (!$('console-shell').hidden && location.hash.slice(1) !== document.body.dataset.view) navigate(location.hash.slice(1), false); });
 
@@ -593,18 +601,26 @@ function focusBoundary(boundary) {
   // Existing copy streams start near the requested boundary, not a frame-accurate seek.
   Promise.resolve(jumpToTimelineTime(ms, 'detail', { autoplay: !$('replay-player').hidden && !$('replay-player').paused })).catch(error => setPlaybackNotice(error.message, true));
 }
+function playbackContextKey() {
+  return JSON.stringify([state.date, state.playbackSource, state.playbackSelectionVersion || 0, state.configRevision,
+    state.playbackSource === 'dvr' ? [$('dvr-select').value, $('dvr-channel').value] : state.selectedCamera]);
+}
+function requirePlaybackContext(key) {
+  if (key !== playbackContextKey()) throw new Error('日期或录像来源已改变，请重新打开时间编辑。');
+}
 function openBoundaryEditor(boundary) {
   const original = state[boundary === 'in' ? 'inMs' : 'outMs'];
   if (original === null) { openRangeEditor(); return; }
-  const sheet = openDialog(boundary === 'in' ? '调整开始时间' : '调整结束时间', `${state.date} · 北京时间`);
+  const context = playbackContextKey(), date = state.date;
+  const sheet = openDialog(boundary === 'in' ? '调整入点' : '调整出点', `${date} · 北京时间`);
   const input = enhanceTimeInput(labelledInput(sheet.content, '时间', boundaryLabel(original), { placeholder: '201530 → 20:15:30', maxLength: 8 }));
   const steps = document.createElement('div'); steps.className = 'boundary-steps'; sheet.content.append(steps);
-  const read = () => rangeTimeMs(input.value, state.date, boundary === 'out');
+  const read = () => { requirePlaybackContext(context); return rangeTimeMs(input.value, date, boundary === 'out'); };
   for (const seconds of [-10, -1, 1, 10]) addButton(steps, `${seconds > 0 ? '+' : '−'}${Math.abs(seconds)} 秒`, 'quiet-button', () => {
     try { input.value = boundaryLabel(clampBoundaryTime(read() + seconds * 1000, boundary)); sheet.error.textContent = ''; input.dispatchEvent(new Event('input', { bubbles: true })); } catch (error) { sheet.error.textContent = error.message; }
   });
-  if (state.cursorMs !== null) addButton(sheet.content, '用当前定位时间', 'quiet-button', () => { input.value = boundaryLabel(clampBoundaryTime(state.cursorMs, boundary)); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  addButton(sheet.actions, '定位原时间', 'quiet-button', () => { sheet.close(); focusBoundary(boundary); });
+  if (state.cursorMs !== null) addButton(sheet.content, '用当前定位时间', 'quiet-button', () => { if (context !== playbackContextKey()) { sheet.error.textContent = '日期或录像来源已改变，请重新打开时间编辑。'; return; } input.value = boundaryLabel(clampBoundaryTime(state.cursorMs, boundary)); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  addButton(sheet.actions, '定位原时间', 'quiet-button', () => { if (context !== playbackContextKey()) { sheet.error.textContent = '日期或录像来源已改变，请重新打开时间编辑。'; return; } sheet.close(); focusBoundary(boundary); });
   addButton(sheet.actions, '应用并定位', 'primary-button', () => {
     try { const value = read(); if (clampBoundaryTime(value, boundary) !== value) throw new Error('开始必须早于结束，至少保留 1 秒。'); state[boundary === 'in' ? 'inMs' : 'outMs'] = value; updateSelection(); sheet.close(); focusBoundary(boundary); } catch (error) { sheet.error.textContent = error.message; }
   });
@@ -625,11 +641,13 @@ function updateSelection() {
   if (warning) {
     const count = gap && state.playbackSource === 'mediamtx' ? countCoverageGaps(state.segments, inMs, outMs) : 0;
     warning.hidden = count === 0; $('selection-gap-count').textContent = String(count);
-    warning.setAttribute('aria-label', `${count} 处录像缺口，导出时需要确认`);
-    warning.title = `${count} 处录像缺口，导出时需要确认`;
+    warning.disabled = state.busy;
+    warning.setAttribute('aria-label', `查看 ${count} 处录像中断的时间范围`);
+    warning.title = `查看 ${count} 处录像中断的时间范围`;
   }
   const exportButton = $('export-range'), selectionHelp = $('selection-help');
   exportButton.disabled = !valid || !hasPlaybackSelection() || state.busy;
+  const cancel = $('cancel-export'); if (cancel) cancel.hidden = !state.busy;
   exportButton.title = valid ? '' : '请先设置有效的入点和出点';
   selectionHelp.classList.remove('warning');
   selectionHelp.textContent = state.playbackSource === 'dvr'
@@ -637,7 +655,7 @@ function updateSelection() {
     : !valid
     ? ''
     : gap
-      ? '这段本地录像有缺口，导出时可选择跳过缺口或改选 DVR。'
+      ? '选段含录像中断。点击警告查看每段时间，确认后可导出已有录像。'
       : '';
   selectionHelp.hidden = !selectionHelp.textContent;
   if (inMs === null || outMs === null || outMs <= inMs) { overlay.hidden = true; $('overview-selection').hidden = true; return; }
@@ -652,6 +670,7 @@ function updateSelection() {
   }
 }
 function clearReplay() {
+  cancelReplayHold();
   state.mediaLive?.close(); state.mediaLive = null;
   state.lastFramePending = null;
   stopHlsPreview();
@@ -973,6 +992,7 @@ function handlePlaybackError() {
 }
 function continueReplay() {
   const video = $('replay-player'), bounds = state.playBounds;
+  if (state.holdSeek) return;
   syncReplayToggle();
   if (bounds?.sdkTimingUnknown) {
     if (video.ended) { state.playbackAutoplay = false; state.followPlayback = false; syncReplayToggle(); setPlaybackNotice(`本段结束，请重新选时间。${sdkPlaybackNotice()}`); }
@@ -1255,6 +1275,45 @@ function stepReplay(seconds) {
   if (tryBufferedReplaySeek(next, autoplay)) return;
   Promise.resolve(jumpToTimelineTime(next, 'detail', { autoplay })).catch(error => setPlaybackNotice(error.message, true));
 }
+function beginReplayHold() {
+  if (state.previewMode === 'live' || !state.date || !state.segments.length) return null;
+  syncPlaybackCursor();
+  state.lastFramePending = null;
+  if (state.previewMode === 'last-frame') state.previewMode = 'replay';
+  const video = $('replay-player');
+  const hold = { context: playbackContextKey(), requestId: state.playRequestId,
+    cursorMs: state.cursorMs, timelineStartMs: state.timelineStartMs, targetMs: state.cursorMs ?? dateStart(state.date),
+    autoplay: !video.hidden && (!video.paused || state.playbackAutoplay === true && !state.followPlayback) };
+  state.holdSeek = hold;
+  return hold;
+}
+function repeatReplayHold(hold, seconds) {
+  if (!hold || state.holdSeek !== hold) return;
+  if (hold.context !== playbackContextKey() || hold.requestId !== state.playRequestId) { cancelReplayHold(); return; }
+  const day = dateStart(state.date);
+  hold.targetMs = Math.max(day, Math.min(timelineLimit(), day + 86400000 - 1, hold.targetMs + seconds * 1000));
+  state.cursorMs = hold.targetMs;
+  setTimelineWindow(hold.targetMs);
+  showScrubTime(hold.targetMs, seconds < 0 ? '连续后退' : '连续前进');
+}
+function commitReplayHold(hold) {
+  if (!hold || state.holdSeek !== hold) return;
+  state.holdSeek = null; fadeScrubTime();
+  if (hold.context !== playbackContextKey() || hold.requestId !== state.playRequestId || document.body.dataset.view !== 'replay') return;
+  if (tryBufferedReplaySeek(hold.targetMs, hold.autoplay)) return;
+  Promise.resolve(jumpToTimelineTime(hold.targetMs, 'detail', { autoplay: hold.autoplay })).catch(error => setPlaybackNotice(error.message, true));
+}
+function abandonReplayHold(hold) {
+  if (!hold || state.holdSeek !== hold) return;
+  state.holdSeek = null;
+  if (hold.context === playbackContextKey() && hold.requestId === state.playRequestId) {
+    state.cursorMs = hold.cursorMs; state.timelineStartMs = hold.timelineStartMs; renderTimeline(); syncPlaybackCursor();
+  }
+  fadeScrubTime();
+}
+function cancelReplayHold() {
+  for (const control of replayHoldButtons) control.cancel('playback-changed');
+}
 function tryBufferedReplaySeek(ms, autoplay) {
   const video = $('replay-player'), bounds = state.playBounds;
   if (state.playbackSource !== 'mediamtx' || !bounds || bounds.camera !== state.selectedCamera || bounds.date !== state.date
@@ -1291,6 +1350,10 @@ function finishBufferedReplaySeek() {
   if (!pending || pending.requestId !== state.playRequestId || pending.src !== video.src || video.currentSrc !== video.src || video.seeking) return;
   state.pendingLocalSeek = null;
   if (state.playbackSource !== 'mediamtx' || pending.camera !== state.selectedCamera || pending.date !== state.date) return;
+  if (state.holdSeek) {
+    state.followPlayback = !video.error && Math.abs(video.currentTime - pending.offset) <= 0.25;
+    return;
+  }
   if (video.error || Math.abs(video.currentTime - pending.offset) > 0.25) {
     // A browser that cannot settle at the requested point uses the existing
     // source-loading path rather than displaying a falsely precise timestamp.
@@ -1308,7 +1371,7 @@ function interruptTimelineScrub() {
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) interruptTimelineScrub(); });
 window.addEventListener('blur', interruptTimelineScrub);
-window.addEventListener('pagehide', () => { if (state.mediaLive) clearReplay(); else stopHlsPreview(); });
+window.addEventListener('pagehide', () => { cancelReplayHold(); if (state.mediaLive) clearReplay(); else stopHlsPreview(); });
 $('timeline').addEventListener('keydown', event => {
   if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || state.cursorMs === null) return;
   if (event.target !== $('timeline')) return;
@@ -1362,7 +1425,7 @@ function syncPlaybackCursor() {
   const video = $('replay-player'), bounds = state.playBounds;
   // A picked time remains authoritative while a new stream is loading or fails.
   // Only a stream that actually started playing may advance the shared cursor.
-  if (bounds?.sdkTimingUnknown || state.pendingHlsStart || state.previewMode === 'live' || (state.playFormat === 'hls' && state.hlsStopped) || state.dragging || state.pendingScrub || state.pendingLocalSeek || !state.followPlayback || !bounds || video.hidden || video.error || video.seeking || video.readyState < 2 || video.currentSrc !== video.src || !Number.isFinite(video.currentTime)) return;
+  if (bounds?.sdkTimingUnknown || state.pendingHlsStart || state.previewMode === 'live' || (state.playFormat === 'hls' && state.hlsStopped) || state.dragging || state.holdSeek || state.pendingScrub || state.pendingLocalSeek || !state.followPlayback || !bounds || video.hidden || video.error || video.seeking || video.readyState < 2 || video.currentSrc !== video.src || !Number.isFinite(video.currentTime)) return;
   state.cursorMs = Math.min(bounds.start + Math.max(0, video.currentTime) * 1000, bounds.start + bounds.duration * 1000, dateStart(state.date) + 86400000);
   // Natural playback scrolls the hour under the fixed centre needle.
   const start = clampTimelineCenter(state.cursorMs) - timelineWindow().span / 2;
@@ -1415,6 +1478,13 @@ $('previous-day').addEventListener('click', () => changeReplayDay(-1));
 $('next-day').addEventListener('click', () => changeReplayDay(1));
 $('skip-back').addEventListener('click', () => stepReplay(-10));
 $('skip-forward').addEventListener('click', () => stepReplay(10));
+for (const [id, seconds] of [['skip-back', -10], ['skip-forward', 10]]) {
+  replayHoldButtons.push(bindPressRepeat($(id), { onStart: beginReplayHold,
+    onRepeat: hold => repeatReplayHold(hold, seconds), onCommit: commitReplayHold, onCancel: abandonReplayHold }));
+}
+for (const id of ['date-select', 'playback-source', 'camera-select', 'dvr-select', 'dvr-channel']) {
+  $(id).addEventListener('change', cancelReplayHold, true);
+}
 $('replay-player').addEventListener('timeupdate', syncPlaybackCursor);
 document.addEventListener('keydown', event => {
   const target = event.target;
@@ -1442,40 +1512,94 @@ document.addEventListener('keydown', event => {
 });
 $('export-range').addEventListener('click', async () => {
   if (state.busy || !hasPlaybackSelection() || state.inMs === null || state.outMs === null || state.outMs <= state.inMs) return;
-  const button = $('export-range'); button.disabled = true; state.busy = true; button.textContent = '正在提交…';
-  let submittedPayload;
-  try {
-    const selection = state.playbackSource === 'dvr'
-      ? { source: 'hikvision', deviceId: $('dvr-select').value, channel: $('dvr-channel').value, dvrMethod: 'auto' }
-      : { source: 'mediamtx', camera: state.selectedCamera, mode: 'copy' };
-    submittedPayload = { ...selection, start: wallTime(state.inMs), end: wallTime(state.outMs) };
-    const result = await api('/console/api/export', { method: 'POST', body: body(submittedPayload) });
-    notify(result.reused ? '已复用录像' : '已提交导出', false, { icon: 'download', range: submittedPayload.start.slice(11) + ' → ' + submittedPayload.end.slice(11) }); flashSubmitted(button); refreshState().catch(() => {});
-  } catch (error) { if (error.code === 'MEDIAMTX_GAPS' && submittedPayload) confirmIncompleteExport(error.coverage, submittedPayload); else notify(error.code === 'MEDIAMTX_EMPTY' ? '所选时间没有可导出的本地录像，请更换时间或选择 DVR。' : error.message, true); }
-  finally { state.busy = false; if (!button.classList.contains('submitted')) setButtonIcon(button, 'download', '导出选中片段'); updateSelection(); }
+  const selection = captureExportSelection(), coverage = selectedGapCoverage();
+  if (coverage.missingIntervals.length) { confirmIncompleteExport(coverage, selection); return; }
+  await submitExportSelection(selection);
 });
+$('selection-gap-warning').addEventListener('click', () => {
+  if (state.busy || !hasPlaybackSelection()) return;
+  const coverage = selectedGapCoverage();
+  if (coverage.missingIntervals.length) confirmIncompleteExport(coverage, captureExportSelection());
+});
+$('cancel-export').addEventListener('click', () => cancelExportSubmission());
 
+function captureExportSelection() {
+  const source = state.playbackSource === 'dvr'
+    ? { source: 'hikvision', deviceId: $('dvr-select').value, channel: $('dvr-channel').value, dvrMethod: 'auto' }
+    : { source: 'mediamtx', camera: state.selectedCamera, mode: 'copy' };
+  return { context: playbackContextKey(), inMs: state.inMs, outMs: state.outMs,
+    payload: { ...source, start: wallTime(state.inMs), end: wallTime(state.outMs) } };
+}
+function isExportSelectionCurrent(selection) {
+  return selection.context === playbackContextKey() && selection.inMs === state.inMs && selection.outMs === state.outMs;
+}
+function selectedGapCoverage() {
+  const gaps = state.playbackSource === 'mediamtx' ? listCoverageGaps(state.segments, state.inMs, state.outMs) : [];
+  return { missingSeconds: gaps.reduce((total, gap) => total + (gap.end - gap.start) / 1000, 0),
+    missingIntervals: gaps.map(gap => ({ start: wallTime(gap.start), end: wallTime(gap.end) })) };
+}
+function cancelExportSubmission(silent = false) {
+  if (!exportSubmission) return;
+  exportSubmission.silent = silent;
+  exportSubmission.controller.abort();
+}
+async function submitExportSelection(selection, acceptGaps = false) {
+  if (state.busy) return false;
+  if (!isExportSelectionCurrent(selection)) { notify('日期、通道或入出点已改变，请重新确认当前选段。', true); return false; }
+  const button = $('export-range'), pending = { controller: new AbortController(), session: consoleSession, silent: false, timedOut: false };
+  exportSubmission = pending;
+  state.busy = true; button.disabled = true; button.textContent = '正在核验…'; updateSelection();
+  const timer = setTimeout(() => { pending.timedOut = true; pending.controller.abort(); }, 20000);
+  let newCoverage;
+  try {
+    const payload = { ...selection.payload, ...(acceptGaps ? { acceptGaps: true } : {}) };
+    const result = await api('/console/api/export', { method: 'POST', body: body(payload), signal: pending.controller.signal });
+    if (pending.session !== consoleSession) return false;
+    rememberSubmittedTask('exports', result.taskId);
+    notify(result.reused ? '已复用录像' : acceptGaps ? '已提交，跳过录像中断' : '已提交导出', false,
+      { icon: 'download', kind: 'exports', range: payload.start.slice(11) + ' → ' + payload.end.slice(11) });
+    flashSubmitted(button); refreshState().catch(() => {});
+    return true;
+  } catch (error) {
+    if (pending.session !== consoleSession || pending.silent) return false;
+    if (pending.controller.signal.aborted) {
+      notify(pending.timedOut ? '录像核验超时，请查看任务状态后重试。' : '已停止等待提交结果；已创建的任务可在任务页取消。', pending.timedOut);
+      refreshState().catch(() => {});
+    } else if (error.code === 'MEDIAMTX_GAPS') {
+      if (isExportSelectionCurrent(selection) && document.body.dataset.view === 'replay') newCoverage = error.coverage;
+      else notify('该选段含录像中断，请返回回放页查看并确认。', true);
+    } else notify(error.code === 'MEDIAMTX_EMPTY' ? '所选时间没有可导出的 MediaMTX 录像，请更换时间或录像来源。' : error.message, true);
+  } finally {
+    clearTimeout(timer);
+    if (exportSubmission === pending) exportSubmission = null;
+    state.busy = false;
+    if (!button.classList.contains('submitted')) setButtonIcon(button, 'download', '导出选中片段');
+    updateSelection();
+  }
+  if (newCoverage) confirmIncompleteExport(newCoverage, selection);
+  return false;
+}
 function flashSubmitted(button, icon = 'download', label = '导出选中片段') {
   clearTimeout(button.submittedTimer); setButtonIcon(button, 'check', '已提交'); button.classList.add('submitted');
   button.submittedTimer = setTimeout(() => { button.classList.remove('submitted'); setButtonIcon(button, icon, label); }, 1200);
 }
-
-function confirmIncompleteExport(coverage, payload) {
+function confirmIncompleteExport(coverage, selection) {
   const intervals = coverage?.missingIntervals || [];
-  const total = Math.ceil(Number(coverage?.missingSeconds) || 0);
-  const sheet = openDialog('本地录像不完整', `${intervals.length} 处缺口，共 ${formatClipDuration(total * 1000)}。跳过后只导出已有录像。`);
-  const list = document.createElement('div'); list.className = 'gap-intervals';
-  for (const interval of intervals) { const row = document.createElement('p'); row.textContent = `${interval.start} → ${interval.end}`; list.append(row); }
+  const sheet = openDialog('选段含录像中断', '以下时间没有录像。继续导出将跳过这些部分，只保留已有画面。', { trackChanges: false });
+  const list = document.createElement('div'); list.className = 'gap-intervals'; list.setAttribute('aria-label', '录像中断时间范围');
+  for (const interval of intervals) {
+    const row = document.createElement('p');
+    row.textContent = interval.start + ' → ' + interval.end;
+    list.append(row);
+  }
   sheet.content.append(list);
-  const local = addButton(sheet.actions, '仍用本地录像', 'primary-button', async () => {
-    if (state.busy) return; state.busy = true; sheet.setPending(true); local.textContent = '正在提交…';
-    try { await api('/console/api/export', { method: 'POST', body: body({ ...payload, acceptGaps: true }) }); sheet.close(); notify('已提交，跳过录像缺口', false, { icon: 'download', range: payload.start.slice(11) + ' → ' + payload.end.slice(11) }); flashSubmitted($('export-range')); refreshState().catch(() => {}); }
-    catch (error) { sheet.setPending(false); local.textContent = '仍用本地录像'; sheet.error.textContent = error.message; }
-    finally { state.busy = false; updateSelection(); }
+  addButton(sheet.actions, '取消', 'quiet-button', () => sheet.close());
+  addButton(sheet.actions, '接受中断并导出', 'primary-button', async () => {
+    if (!isExportSelectionCurrent(selection)) { sheet.error.textContent = '日期、通道或入出点已改变，请关闭后重新确认。'; return; }
+    if (state.busy) return;
+    sheet.close();
+    await submitExportSelection(selection, true);
   });
-  const dvr = addButton(sheet.actions, '改选 DVR', 'quiet-button', () => { sheet.close(); $('playback-source').value = 'dvr'; $('playback-source').dispatchEvent(new Event('change', { bubbles: true })); openPlaybackConfiguration(); });
-  dvr.disabled = !state.dvrs.length;
-  const note = document.createElement('p'); note.className = 'dialog-description'; note.textContent = state.dvrs.length ? 'DVR 是否有完整录像，需要另选录像机和通道核查。' : '尚未配置 DVR；可关闭后重新选时间。'; sheet.content.append(note);
 }
 
 function prettyBytes(value) {
@@ -1575,14 +1699,14 @@ function renderOutputUploadStates(parent, file, compact = false) {
   const signature = JSON.stringify(file.uploads || {});
   if (parent.dataset.signature === signature) return;
   parent.dataset.signature = signature; parent.replaceChildren();
-  for (const [provider, label, icon] of [['cloud189', '189', 'cloud'], ['bilibili', 'B站', 'tv']]) {
+  for (const [provider, label, icon] of [['cloud189', '189', 'cloud189'], ['bilibili', 'B站', 'tv']]) {
     const fact = file.uploads?.[provider];
     const status = fact?.status || 'unknown';
     const labels = { none: '无记录', draft: '未提交', queued: '排队中', uploading: '上传中', completed: '已上传', failed: '失败', unknown: '待核实' };
     const row = document.createElement('span'); row.className = 'output-upload-state'; row.dataset.status = status;
     row.title = `${label}：${fact ? labels[status] || labels.unknown : '状态未读取'}`;
     row.setAttribute('aria-label', row.title);
-    row.innerHTML = iconSvg(icon) + (status === 'completed' ? iconSvg('check') : ['failed', 'unknown'].includes(status) ? iconSvg('warning') : '');
+    row.innerHTML = iconSvg(icon, provider === 'cloud189' ? 'provider-wordmark' : '') + (['failed', 'unknown'].includes(status) ? iconSvg('warning') : '');
     if (!compact) { const text = document.createElement('span'); text.textContent = row.title; row.append(text); }
     if (status === 'uploading') {
       const progress = document.createElement('progress'); progress.max = 100;
@@ -1618,7 +1742,7 @@ function openOutputDetails(file) {
   const actions = document.createElement('div'); actions.className = 'output-detail-actions'; sheet.content.append(actions);
   const download = createOutputDownload({ file: current, document, resolveUrl: appPath, openDialog, onNotice: notify }); actions.append(download.element);
   const uploadButtons = new Map();
-  for (const [provider, label, icon, enabled] of [['cloud189', '上传到189', 'cloud', window.consoleIntegrations?.cloud189Enabled], ['bilibili', '上传到B站', 'tv', window.consoleIntegrations?.bilibiliEnabled]]) {
+  for (const [provider, label, icon, enabled] of [['cloud189', '上传到189', 'cloud189', window.consoleIntegrations?.cloud189Enabled], ['bilibili', '上传到B站', 'tv', window.consoleIntegrations?.bilibiliEnabled]]) {
     const button = addOutputIconButton(actions, enabled ? label : `${label}：先配置账号`, icon, () => {
       sheet.close(); if (enabled) upload(current, provider, button); else navigateToUploadSettings(provider);
     });
@@ -1658,8 +1782,9 @@ async function upload(file, provider, triggerButton = null) {
     if (pendingUploads.has(key)) return;
     pendingUploads.add(key); sheet.setPending(true); submit.textContent = '正在提交…';
     try {
-      await api(`/console/api/outputs/${file.id}/upload/${provider}`, { method: 'POST', body: body({}) });
-      flashSubmitted(triggerButton || submit, 'upload', triggerButton ? '上传成片' : '确认加入队列'); sheet.close(); notify(`已加入${label}上传队列`, false, { icon: 'upload', range: file.start && file.end ? file.start.slice(11) + ' → ' + file.end.slice(11) : file.filename });
+      const result = await api(`/console/api/outputs/${file.id}/upload/${provider}`, { method: 'POST', body: body({}) });
+      rememberSubmittedTask('uploads', result.job?.id);
+      flashSubmitted(triggerButton || submit, 'upload', triggerButton ? '上传成片' : '确认加入队列'); sheet.close(); notify(`已加入${label}上传队列`, false, { icon: 'upload', kind: 'uploads', range: file.start && file.end ? file.start.slice(11) + ' → ' + file.end.slice(11) : file.filename });
       refreshState().catch(() => notify('已提交，状态暂未同步，请稍后刷新。', true));
     } catch (error) { sheet.setPending(false); submit.textContent = '确认加入队列'; sheet.error.textContent = error.message; }
     finally { pendingUploads.delete(key); }
@@ -1675,13 +1800,28 @@ async function refreshOutputs() {
 }
 $('output-search').addEventListener('input', renderOutputs);
 $('output-sort').addEventListener('click', toggleOutputSort);
-$('refresh-outputs').addEventListener('click', async () => { const button = $('refresh-outputs'); button.disabled = true; setButtonIcon(button, 'refresh', '正在刷新成片'); try { await refreshOutputs(); notify('成片列表已同步。'); } catch (error) { notify(error.message, true); } finally { button.disabled = false; setButtonIcon(button, 'refresh', '刷新成片'); } });
+
 
 const transferSampler = createTransferSampler();
 const taskFeeds = {
   exports: createTaskFeed({ list: $('task-list'), scroller: $('task-export-panel'), sentinel: $('task-export-sentinel'), makeCard: task => presentTaskCard(task, false), createdAt: taskCreatedAt }),
   uploads: createTaskFeed({ list: $('upload-list'), scroller: $('task-upload-panel'), sentinel: $('task-upload-sentinel'), makeCard: task => presentTaskCard(task, true), createdAt: taskCreatedAt }),
 };
+function rememberSubmittedTask(kind, id) {
+  if (!['exports', 'uploads'].includes(kind) || !id) return;
+  pendingTaskFocus = { kind, id };
+  if (document.body.dataset.view === 'tasks') selectTaskTab(kind === 'uploads');
+}
+function revealSubmittedTask() {
+  const pending = pendingTaskFocus;
+  if (!pending || document.body.dataset.view !== 'tasks') return;
+  const panel = $(pending.kind === 'uploads' ? 'task-upload-panel' : 'task-export-panel');
+  if (!panel.hidden && taskFeeds[pending.kind].reveal(pending.id)) pendingTaskFocus = null;
+}
+function openTaskPage(kind) {
+  if (['exports', 'uploads'].includes(kind)) selectTaskTab(kind === 'uploads');
+  navigate('tasks');
+}
 function selectTaskTab(upload, focus = false) {
   for (const [name, selected] of [['export', !upload], ['upload', upload]]) {
     const button = $('task-tab-' + name); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
@@ -1689,6 +1829,7 @@ function selectTaskTab(upload, focus = false) {
   }
   if (window.matchMedia?.('(min-width: 1024px)').matches) { taskFeeds.exports.resume(); taskFeeds.uploads.resume(); }
   else (upload ? taskFeeds.uploads : taskFeeds.exports).resume();
+  revealSubmittedTask();
 }
 function syncTaskLayout() { selectTaskTab($('task-tab-upload').getAttribute('aria-selected') === 'true'); }
 window.addEventListener('resize', syncTaskLayout);
@@ -1710,6 +1851,7 @@ function renderTasks() {
   document.querySelectorAll('[data-task-count]').forEach(node => { node.textContent = String(activeCount); node.hidden = activeCount === 0; });
   for (const [id, value] of [['export-task-count', exports], ['upload-task-count', uploads]]) { const node = $(id); node.textContent = String(value); node.hidden = value === 0; }
   taskFeeds.exports.update(state.tasks); taskFeeds.uploads.update(state.uploads);
+  revealSubmittedTask();
 }
 // Explicit retry starts a new attempt; ordinary completion never reorders a task.
 function taskCreatedAt(task) {
@@ -2541,14 +2683,14 @@ const settingsDetails = {
 for (const row of document.querySelectorAll('[data-settings-open]')) row.addEventListener('click', () => settingsDetails[row.dataset.settingsOpen]());
 
 function openPlaybackTimeEditor() {
-  const date = state.date, version = state.playbackSelectionVersion;
+  const date = state.date, context = playbackContextKey();
   const sheet = openDialog('定位时间', date);
   const input = enhanceTimeInput(labelledInput(sheet.content, '播放位置', boundaryLabel(state.cursorMs ?? dateStart(date)), { placeholder: '2140 或 214025', maxLength: 8 }));
   input.setAttribute('aria-description', '北京时间，可输入 4 或 6 位数字；定位不会改变入点和出点。');
   addButton(sheet.actions, '编辑选段', 'secondary-button', () => { sheet.close(); openRangeEditor(); });
   addButton(sheet.actions, '定位', 'primary-button', async () => {
     try {
-      if (date !== state.date || version !== state.playbackSelectionVersion) throw new Error('录像来源已改变，请重新打开定位时间。');
+      requirePlaybackContext(context);
       const ms = rangeTimeMs(input.value, date);
       if (ms > timelineLimit()) throw new Error('所选时间尚未发生，请选择过去的时间。');
       // 复用时间轴的定位入口，保持导出边界与单路预览语义。
@@ -2560,17 +2702,18 @@ function openPlaybackTimeEditor() {
   input.focus();
 }
 function openRangeEditor() {
-  const sheet = openDialog('时间', state.date);
+  const date = state.date, context = playbackContextKey();
+  const sheet = openDialog('编辑选段', date);
   const fields = document.createElement('div'); fields.className = 'time-fields'; sheet.content.append(fields);
   const initialStart = state.inMs ?? state.cursorMs ?? dateStart(state.date);
   const initialEnd = state.outMs ?? Math.min(initialStart + 60000, dateStart(state.date) + 86400000);
-  const start = enhanceTimeInput(labelledInput(fields, '开始时间', boundaryLabel(initialStart), { placeholder: '2140 或 214025', maxLength: 8 }));
+  const start = enhanceTimeInput(labelledInput(fields, '入点', boundaryLabel(initialStart), { placeholder: '2140 或 214025', maxLength: 8 }));
   const endValue = boundaryLabel(initialEnd);
-  const end = enhanceTimeInput(labelledInput(fields, '结束时间', endValue, { placeholder: '2140 或 214035', maxLength: 8 }));
+  const end = enhanceTimeInput(labelledInput(fields, '出点', endValue, { placeholder: '2140 或 214035', maxLength: 8 }));
   start.setAttribute('aria-description', '北京时间，可输入 4 或 6 位数字，自动补冒号。');
   end.setAttribute('aria-description', '北京时间，可输入 4 或 6 位数字；240000 表示当天结束。');
   const summary = document.createElement('p'); summary.className = 'range-preview'; summary.setAttribute('aria-live', 'polite'); sheet.content.append(summary);
-  const read = () => { const a = rangeTimeMs(start.value, state.date), b = rangeTimeMs(end.value, state.date, true); if (b <= a) throw new Error('结束时间必须晚于开始时间；跨日片段请按日期分开导出。'); return [a, b]; };
+  const read = () => { requirePlaybackContext(context); const a = rangeTimeMs(start.value, date), b = rangeTimeMs(end.value, date, true); if (b <= a) throw new Error('结束时间必须晚于开始时间；跨日片段请按日期分开导出。'); return [a, b]; };
   const preview = () => { try { const [a, b] = read(); summary.textContent = formatClipDuration(b - a); } catch (error) { summary.textContent = error.message; } };
   start.addEventListener('input', preview); end.addEventListener('input', preview); preview();
   addButton(sheet.actions, '应用选段', 'primary-button', () => { try {
@@ -2637,7 +2780,7 @@ function reauthenticateForUploads() {
 function updatePlaybackContext() {
   const dvr = $('playback-source').value === 'dvr';
   const sourcePicker = $('quick-source-select'), recorder = $('dvr-select');
-  const sources = [{ value: 'mediamtx', textContent: '本地录像', disabled: false }, ...[...recorder.options].filter(option => option.value).map(option => ({ value: `dvr:${option.value}`, textContent: option.textContent, disabled: option.disabled }))];
+  const sources = [{ value: 'mediamtx', textContent: 'MediaMTX', disabled: false }, ...[...recorder.options].filter(option => option.value).map(option => ({ value: `dvr:${option.value}`, textContent: option.textContent, disabled: option.disabled }))];
   const sourceSignature = sources.map(option => `${option.value}:${option.textContent}:${option.disabled}`).join('|');
   if (sourcePicker.dataset.options !== sourceSignature) {
     sourcePicker.replaceChildren(...sources.map(item => { const option = document.createElement('option'); Object.assign(option, item); return option; }));
@@ -2703,23 +2846,19 @@ function openPlaybackConfiguration() {
   $('quick-source-select').focus();
 }
 
+function reloadApplication() {
+  if (settingsInline && !settingsInline.requestClose('reload-application')) return;
+  cancelReplayHold();
+  const target = new URL(location.href);
+  target.searchParams.set('_reload', String(Date.now()));
+  location.replace(target.href);
+}
 function setupTouchControls() {
   document.querySelectorAll('input[type="password"]').forEach(input => { const wrapper = document.createElement('div'); wrapper.className = 'password-control'; input.before(wrapper); wrapper.append(input); const toggle = addButton(wrapper, '显示', '', () => { const visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; toggle.textContent = visible ? '隐藏' : '显示'; toggle.setAttribute('aria-pressed', String(visible)); }); toggle.setAttribute('aria-label', '显示或隐藏密码'); toggle.setAttribute('aria-pressed', 'false'); });
   updateOutputSort();
   $('edit-range').addEventListener('click', openRangeEditor);
   $('timeline-time-editor').addEventListener('click', openPlaybackTimeEditor);
-  for (const [id, action] of [
-    ['refresh-tasks', () => refreshState()],
-    ['refresh-settings', () => Promise.all([loadConsoleConfig(), loadSettings(), loadCache()])],
-  ]) {
-    $(id).addEventListener('click', async () => {
-      const button = $(id); if (button.disabled) return;
-      button.disabled = true;
-      try { await action(); notify('已刷新。'); }
-      catch (error) { notify(error.message, true); }
-      finally { button.disabled = false; }
-    });
-  }
+  document.querySelectorAll('[data-app-reload]').forEach(button => button.addEventListener('click', reloadApplication));
   $('playback-context').addEventListener('click', openPlaybackDate);
   $('quick-source-select').addEventListener('change', changeQuickPlaybackSource);
   $('quick-source-select').addEventListener('focus', refreshPlaybackChoices);

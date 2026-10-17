@@ -8,7 +8,7 @@ class Element {
   addEventListener(type, fn) { this.listeners[type] = fn; }
 }
 test('shared icons use a closed SVG vocabulary and one accessible button label', () => {
-  for (const icon of ['upload', 'more', 'add', 'edit', 'sort-newest', 'sort-oldest', 'search', 'logout', 'refresh', 'chevron', 'dvr', 'mediamtx', 'disk', 'trash', 'key', 'check-circle']) {
+  for (const icon of ['upload', 'more', 'add', 'edit', 'sort-newest', 'sort-oldest', 'search', 'logout', 'refresh', 'reload', 'chevron', 'dvr', 'mediamtx', 'cloud189', 'disk', 'trash', 'key', 'check-circle']) {
     const node = setButtonIcon(new Element(), icon, '操作');
     assert.match(node.innerHTML, /^<svg[^>]*aria-hidden="true"/); assert.equal(node.attributes['aria-label'], '操作'); assert.equal(node.title, '操作');
   }
@@ -40,12 +40,17 @@ test('settings rows expose one button with a decorative chevron beside optional 
 test('brand, favicon, Apple touch and PWA manifest share the selected v2 icon', async () => {
   const fs = await import('node:fs'); const { statusDashboardPage } = await import('../lib/status-dashboard.js');
   const html = statusDashboardPage('/camera');
+  assert.equal(html.match(/<title>([^<]+)<\/title>/)?.[1], 'H1kM3sh');
   assert.match(html, /class="workspace-logo" src="\/camera\/console-icon-v2\.svg"/);
   assert.match(html, /rel="icon" type="image\/svg\+xml" href="\/camera\/console-icon-v2\.svg"/);
   assert.match(html, /rel="apple-touch-icon" sizes="180x180" href="\/camera\/apple-touch-icon-v2\.png"/);
   assert.match(html, /href="\/camera\/site-v2\.webmanifest"/); assert.doesNotMatch(html, /class="workspace-logo"[^>]*>h</);
   const manifest = JSON.parse(fs.readFileSync(new URL('../public/site-v2.webmanifest', import.meta.url), 'utf8'));
   assert.deepEqual(manifest.icons.map(icon => icon.sizes), ['192x192', '512x512', 'any']);
+  for (const filename of ['site.webmanifest', 'site-v1.webmanifest', 'site-v2.webmanifest']) {
+    const install = JSON.parse(fs.readFileSync(new URL('../public/' + filename, import.meta.url), 'utf8'));
+    assert.equal(install.name, 'H1kM3sh'); assert.equal(install.short_name, 'H1kM3sh');
+  }
   for (const icon of manifest.icons) assert.ok(!icon.purpose || icon.purpose === 'any');
   for (const [name, size] of [['console-icon-v2-192.png', 192], ['console-icon-v2-512.png', 512], ['apple-touch-icon-v2.png', 180]]) {
     const bytes = fs.readFileSync(new URL('../public/' + name, import.meta.url));

@@ -1277,7 +1277,7 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 .precision-layout #view-replay .clip-gap { order:1; }
 .precision-layout #view-replay .selection-buttons { order:2; }
 .precision-layout #view-replay #export-range { order:3; }
-.precision-layout #edit-range { display:none; }
+.precision-layout #edit-range { display:inline-flex; }
 .precision-layout #view-replay .video-control { border-radius:var(--radius-pill); background:var(--fill-well); }
 .precision-layout #view-replay #playback-toggle { top:12px; bottom:auto; left:12px; grid-column:auto; }
 .precision-layout #view-replay #go-live { top:12px; bottom:auto; right:12px; left:auto; }
@@ -1421,4 +1421,25 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 }
 @media (orientation:landscape) and (max-height:540px) and (min-width:568px) and (max-width:1023px) {
   .precision-layout #view-replay:not(:fullscreen):not(.replay-expanded) .timeline-section { background:var(--surface); border-radius:var(--radius-panel); }
+}
+
+/* Keep precise range editing and clearing next to the marked boundaries. */
+.precision-layout .app-header { display:flex; align-items:center; justify-content:space-between; min-height:44px; gap:12px; }
+.precision-layout:is([data-view='library'],[data-view='tasks'],[data-view='settings']) .app-header { display:none; }
+.app-reload { flex:none; }
+.precision-layout #view-replay .mark-controls .selection-buttons { grid-column:1/-1; position:static; display:flex; justify-content:flex-end; gap:8px; margin:0; }
+.precision-layout #view-replay .mark-controls .selection-buttons > button { display:inline-flex; align-items:center; justify-content:center; width:auto; min-height:44px; height:44px; padding:8px 12px; gap:8px; border:0; background:transparent; color:var(--muted); font:14px var(--font); }
+.precision-layout #view-replay .mark-controls .selection-buttons > button:hover { color:var(--text); background:var(--fill-well); }
+.precision-layout #view-replay .clip-gap { min-width:44px; min-height:44px; padding:8px; border-radius:var(--radius-field); color:var(--warning); }
+.precision-layout #view-replay .clip-gap:hover { background:var(--fill-well); }
+.precision-layout #view-replay #cancel-export { order:2; min-height:44px; }
+.output-upload-state svg.provider-wordmark { width:24px; height:20px; }
+.gap-intervals { display:grid; gap:8px; }
+.gap-intervals > p { margin:0; padding:12px; border-radius:var(--radius-field); background:var(--surface); font-family:var(--mono); overflow-wrap:anywhere; }
+#skip-back, #skip-forward { touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+@media (orientation:landscape) and (max-height:540px) and (min-width:568px) and (max-width:1023px) {
+  .precision-layout #view-replay:not(:fullscreen):not(.replay-expanded) .timeline-section { grid-template-rows:auto 44px 64px; }
+  .precision-layout #view-replay:not(:fullscreen):not(.replay-expanded) .mark-controls { grid-row:1/3; align-self:start; }
+  .precision-layout #view-replay:not(:fullscreen):not(.replay-expanded) .player-transport { grid-column:1; }
+  .precision-layout #view-replay .mark-controls .selection-buttons > button { font-size:12px; padding:4px 8px; gap:4px; }
 }

@@ -23,6 +23,7 @@ function harness(mode='native') {
   if(mode==='native')view.requestFullscreen=async()=>{document.fullscreenElement=view;listeners.fullscreenchange?.();};
   if(mode==='rejected')view.requestFullscreen=async()=>{throw Error('unavailable');};
   const context=vm.createContext({interruptTimelineScrub(){interrupts++;},document,$:id=>nodes.get(id),iconSvg,setButtonIcon,navigate:page=>navigation.push(page),setTimeout:()=>1,clearTimeout(){}});
+  vm.runInContext(script.slice(script.indexOf('function openTaskPage('),script.indexOf('function selectTaskTab(')),context);
   vm.runInContext('let toastTimer;'+script.slice(script.indexOf('function notify('),script.indexOf('async function api(')),context);
   vm.runInContext(script.slice(script.indexOf('// Move shared overlays'),script.indexOf('// 断点只搬运')),context);
   Object.assign(context,{location:{hash:'#replay'},history:{pushState(_state,_title,hash){context.location.hash=hash;navigation.push(hash.slice(1));}},window:{scrollTo(){}},settingsInline:null,outputFeed:null,outputPlayers:{pauseAll(){}},activeDialog:null,clearReplay(){},refreshState:async()=>{},refreshOutputs:async()=>{},loadSettings:async()=>{},loadCache:async()=>{},loadConsoleConfig:async()=>{}});

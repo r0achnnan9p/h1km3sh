@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { createTaskFeed } from '../public/task-presentation.js';
+import { iconSvg, setButtonIcon } from '../public/ui-primitives.js';
 
 const script = fs.readFileSync(new URL('../public/console.js', import.meta.url), 'utf8');
 
@@ -235,5 +237,148 @@ test('Escape exits CSS fullscreen or pending entry without clearing marked range
     h.context.$ = id => ({hidden:false, disabled:false, classList:{contains: name => mode==='css' && name==='replay-expanded'}, click:()=>cleared++});
     h.context.replayFullscreenPending=mode==='pending'; h.context.leaveReplayFullscreen=()=>exited++;
     h.key('Escape'); assert.equal(exited,1); assert.equal(cleared,0);
+  }
+});
+
+
+class TaskNode {
+  constructor(tag = '') {
+    this.tag = tag; this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = {}; this.hidden = false;
+    this.scrollTop = 0; this._text = ''; this.className = ''; this.classes = new Set();
+    this.classList = { add: name => this.classes.add(name), remove: name => this.classes.delete(name),
+      contains: name => this.classes.has(name), toggle: (name, value) => value ? this.classes.add(name) : this.classes.delete(name) };
+  }
+  get firstChild() { return this.children[0]; }
+  get textContent() { return this._text + this.children.map(node => node.textContent).join(''); }
+  set textContent(value) { this._text = value; this.replaceChildren(); }
+  get outerHTML() { return this.className + this.textContent + this.children.map(node => node.outerHTML).join(''); }
+  append(...nodes) { for (const node of nodes) { node.remove(); node.parent = this; this.children.push(node); } }
+  insertBefore(node, reference) { node.remove(); node.parent = this; const index = this.children.indexOf(reference); if (index < 0) this.children.push(node); else this.children.splice(index, 0, node); }
+  replaceChildren(...nodes) { for (const node of [...this.children]) node.remove(); this.append(...nodes); }
+  removeChild(node) { node.remove(); }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this); this.parent = null; }
+  contains(node) { return node === this || this.children.some(child => child.contains(node)); }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name]; }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  async emit(type) { for (const fn of this.listeners[type] || []) await fn({ type, target: this }); }
+  querySelectorAll(selector) { return this.children.flatMap(node => [...(selector === '[data-task-id]' && node.dataset.taskId || selector === node.tag ? [node] : []), ...node.querySelectorAll(selector)]); }
+  get height() { return this.tag === 'details' ? this.children.slice(0, this.open ? undefined : 1).reduce((sum, node) => sum + node.height, 0) : this.className === 'task-date-heading' ? 20 : 64; }
+  get hiddenByDetails() { let node = this.parent; while (node) { if (node.tag === 'details' && !node.open) return true; node = node.parent; } return false; }
+  getClientRects() { return this.hidden || this.hiddenByDetails || this.isVisible && !this.isVisible() ? [] : [this.getBoundingClientRect()]; }
+  getBoundingClientRect() {
+    if (this.hiddenByDetails) return { top: 0, bottom: 0 };
+    if (this.isScroller) return { top: 100, bottom: 400 };
+    const top = this.parent ? this.parent.getBoundingClientRect().top + this.parent.children.slice(0, this.parent.children.indexOf(this)).reduce((sum, node) => sum + node.height, 0) : 100 - (this.scroller?.scrollTop || 0);
+    return { top, bottom: top + this.height };
+  }
+  focus() {}
+}
+function taskNavigationHarness() {
+  const h = navigationHarness(), nodes = new Map(), $ = id => { if (!nodes.has(id)) nodes.set(id, new TaskNode()); return nodes.get(id); };
+  const querySelectorAll = h.document.querySelectorAll;
+  h.document.querySelectorAll = selector => selector === '[data-task-count]' ? [] : querySelectorAll(selector);
+  h.document.createElement = tag => new TaskNode(tag); h.document.activeElement = null;
+  const state = { tasks: [], uploads: [] }, feeds = {};
+  for (const [kind, name] of [['exports', 'export'], ['uploads', 'upload']]) {
+    const list = $(kind === 'exports' ? 'task-list' : 'upload-list'), scroller = $('task-' + name + '-panel');
+    scroller.isScroller = true; scroller.isVisible = () => h.document.body.dataset.view === 'tasks';
+    scroller.clientHeight = 300; list.scroller = scroller;
+    Object.defineProperty(scroller, 'scrollHeight', { get: () => list.children.reduce((sum, node) => sum + node.height, 0) + 44 });
+    feeds[kind] = createTaskFeed({ list, scroller, sentinel: $('task-' + name + '-sentinel'), document: h.document,
+      createdAt: task => task.createdAt, makeCard: task => { const card = new TaskNode(); card.textContent = task.id; return card; } });
+    state[kind === 'exports' ? 'tasks' : 'uploads'] = Array.from({ length: 90 }, (_, index) => ({ id: kind + '-' + index, status: 'completed', createdAt: 1800000000000 - index * 1000 }));
+  }
+  Object.assign(h.context, { $, state, taskFeeds: feeds, pendingTaskFocus: null });
+  h.context.window.matchMedia = () => ({ matches: false });
+  vm.runInContext(script.slice(script.indexOf('function rememberSubmittedTask('), script.indexOf('function syncTaskLayout(')), h.context);
+  vm.runInContext(script.slice(script.indexOf('function renderTasks('), script.indexOf('// Explicit retry')), h.context);
+  h.context.selectTaskTab(false); h.context.renderTasks();
+  const card = (kind, id) => $(kind === 'exports' ? 'task-list' : 'upload-list').querySelectorAll('[data-task-id]').find(node => node.dataset.taskId === id);
+  const offset = (kind, id) => card(kind, id).getBoundingClientRect().top - 100;
+  const anchor = kind => $(kind === 'exports' ? 'task-list' : 'upload-list').querySelectorAll('[data-task-id]').find(node => node.getBoundingClientRect().bottom > 100);
+  return { ...h, $, state, feeds, card, offset, anchor };
+}
+
+test('a submitted upload selects its task tab, waits for late data, reveals once and leaves later SSE browsing alone', async () => {
+  const h = taskNavigationHarness(); h.context.navigate('tasks');
+  h.feeds.exports.loadMore(); h.feeds.exports.loadMore(); h.$('task-export-panel').scrollTop = 900; await h.$('task-export-panel').emit('scroll');
+  const exportId = h.anchor('exports').dataset.taskId, exportOffset = h.offset('exports', exportId);
+  h.context.selectTaskTab(true); h.feeds.uploads.loadMore(); h.feeds.uploads.loadMore(); h.$('task-upload-panel').scrollTop = 600; await h.$('task-upload-panel').emit('scroll');
+  h.context.navigate('library'); h.context.rememberSubmittedTask('uploads', 'submitted-upload');
+  h.context.navigate('tasks');
+  assert.equal(h.$('task-tab-upload').getAttribute('aria-selected'), 'true'); assert.equal(h.$('task-upload-panel').hidden, false);
+  assert.equal(h.context.pendingTaskFocus.id, 'submitted-upload'); assert.equal(h.$('task-upload-panel').scrollTop, 600);
+  await Promise.resolve().then(() => { h.state.uploads.unshift({ id: 'submitted-upload', status: 'queued', createdAt: 1800000001000 }); h.context.renderTasks(); });
+  assert.equal(h.offset('uploads', 'submitted-upload'), 0); assert.equal(h.context.pendingTaskFocus, null);
+  assert.equal(h.feeds.exports.loadedCount, 60); assert.equal(h.feeds.uploads.loadedCount, 60);
+  h.context.selectTaskTab(false); assert.equal(h.offset('exports', exportId), exportOffset);
+  h.context.selectTaskTab(true); h.$('task-upload-panel').scrollTop = 600; await h.$('task-upload-panel').emit('scroll');
+  const id = h.anchor('uploads').dataset.taskId, offset = h.offset('uploads', id);
+  await Promise.resolve().then(() => { h.state.uploads.unshift({ id: 'unrelated-upload', status: 'queued', createdAt: 1800000002000 }); h.context.renderTasks(); });
+  assert.equal(h.offset('uploads', id), offset); assert.ok(h.offset('uploads', 'submitted-upload') < 0);
+});
+
+test('ordinary task updates and returning to tasks preserve history when there was no local submission', async () => {
+  const h = taskNavigationHarness(); h.context.navigate('tasks'); h.feeds.exports.loadMore();
+  h.$('task-export-panel').scrollTop = 700; await h.$('task-export-panel').emit('scroll');
+  const id = h.anchor('exports').dataset.taskId, offset = h.offset('exports', id);
+  h.context.navigate('library');
+  await Promise.resolve().then(() => { h.state.tasks.unshift({ id: 'other-client-task', status: 'queued', createdAt: 1800000001000 }); h.context.renderTasks(); });
+  h.context.navigate('tasks');
+  assert.equal(h.context.pendingTaskFocus, null); assert.equal(h.offset('exports', id), offset); assert.equal(h.feeds.exports.loadedCount, 40);
+});
+
+test('the real upload submission toast opens the upload tab before its task snapshot arrives', async () => {
+  const h = taskNavigationHarness(), sheets = [];
+  h.context.navigate('library');
+  Object.assign(h.context, { iconSvg, setButtonIcon, body: JSON.stringify, toastTimer: null, setTimeout: () => 1, clearTimeout() {},
+    api: async () => ({ job: { id: 'new-upload' } }),
+    openDialog(title, description) { const sheet = { title, description, content: new TaskNode(), actions: new TaskNode(), error: {}, setPending(value) { this.pending = value; }, close() { this.closed = true; } }; sheets.push(sheet); return sheet; },
+  });
+  h.context.window.consoleSettings = { cloud189TargetPath: '/test-uploads' };
+  vm.runInContext(script.slice(script.indexOf('function addButton('), script.indexOf('function addSettingsRefresh(')), h.context);
+  vm.runInContext(script.slice(script.indexOf('function notify('), script.indexOf('async function api(')), h.context);
+  vm.runInContext(script.slice(script.indexOf('function flashSubmitted('), script.indexOf('function confirmIncompleteExport(')), h.context);
+  vm.runInContext(script.slice(script.indexOf('const pendingUploads ='), script.indexOf('function acceptOutputs(')), h.context);
+  await h.context.upload({ id: 'test-file', filename: 'test-clip.mp4' }, 'cloud189');
+  await sheets[0].actions.children[0].emit('click');
+  assert.equal(sheets[0].closed, true); assert.equal(h.document.body.dataset.view, 'library');
+  assert.equal(h.context.pendingTaskFocus.kind, 'uploads'); assert.equal(h.context.pendingTaskFocus.id, 'new-upload');
+  const arrow = h.$('toast').children.find(node => node.className === 'toast-task-link');
+  await arrow.emit('click');
+  assert.equal(h.document.body.dataset.view, 'tasks'); assert.equal(h.$('task-tab-upload').getAttribute('aria-selected'), 'true');
+  assert.equal(h.context.pendingTaskFocus.id, 'new-upload');
+  await Promise.resolve().then(() => { h.state.uploads.unshift({ id: 'new-upload', status: 'queued', createdAt: 1800000001000 }); h.context.renderTasks(); });
+  assert.equal(h.context.pendingTaskFocus, null); assert.equal(h.offset('uploads', 'new-upload'), 0);
+});
+
+
+test('an acknowledgement arriving after task navigation selects either submitted kind and reveals late data only once', async () => {
+  for (const [kind, dataKey, tab, previousTab] of [['exports', 'tasks', 'export', 'upload'], ['uploads', 'uploads', 'upload', 'export']]) {
+    const h = taskNavigationHarness(), id = 'acknowledged-' + kind;
+    h.context.navigate('tasks'); h.context.selectTaskTab(kind === 'uploads');
+    const panel = h.$('task-' + tab + '-panel');
+    panel.scrollTop = 600; await panel.emit('scroll');
+    h.context.selectTaskTab(previousTab === 'upload'); h.context.navigate('library');
+    let acknowledge;
+    const acknowledged = new Promise(resolve => { acknowledge = resolve; }).then(job => h.context.rememberSubmittedTask(kind, job.id));
+    h.context.navigate('tasks');
+    assert.equal(h.$('task-tab-' + previousTab).getAttribute('aria-selected'), 'true', kind + ': the previous tab remains selected before acknowledgement');
+    assert.equal(h.context.pendingTaskFocus, null);
+    acknowledge({ id }); await acknowledged;
+    assert.equal(h.$('task-tab-' + tab).getAttribute('aria-selected'), 'true', kind + ': acknowledgement selects the submitted task kind');
+    assert.equal(panel.hidden, false); assert.equal(h.$('task-' + previousTab + '-panel').hidden, true);
+    assert.equal(h.context.pendingTaskFocus.kind, kind); assert.equal(h.context.pendingTaskFocus.id, id);
+    assert.equal(panel.scrollTop, 600, kind + ': missing data keeps the previous scroll until the target can be revealed');
+    h.context.renderTasks();
+    assert.equal(h.context.pendingTaskFocus.id, id, kind + ': a snapshot without the target must retain pending focus');
+    await Promise.resolve().then(() => { h.state[dataKey].unshift({ id, status: 'queued', createdAt: 1800000001000 }); h.context.renderTasks(); });
+    assert.equal(h.context.pendingTaskFocus, null); assert.equal(h.offset(kind, id), 0);
+    panel.scrollTop = 600; await panel.emit('scroll');
+    const historyId = h.anchor(kind).dataset.taskId, historyOffset = h.offset(kind, historyId);
+    await Promise.resolve().then(() => { h.state[dataKey].unshift({ id: 'later-' + kind, status: 'queued', createdAt: 1800000002000 }); h.context.renderTasks(); });
+    assert.equal(h.offset(kind, historyId), historyOffset, kind + ': later SSE preserves subsequent user browsing');
+    assert.ok(h.offset(kind, id) < 0, kind + ': the acknowledged task is not revealed again');
   }
 });

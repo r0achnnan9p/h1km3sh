@@ -11,7 +11,7 @@ function harness({ source = 'mediamtx', safari = true } = {}) {
   const start = Date.parse(state.segments[0].start);
   const video = { src: '', currentSrc: '', currentTime: 0, readyState: 0, paused: true, ended: false, hidden: true, error: null, setAttribute() {}, removeAttribute(key) { if (key === 'src') this.src = ''; }, pause() { this.paused = true; }, load() { this.ended = false; this.readyState = 0; this.currentTime = 0; }, play() { return new Promise((resolve, reject) => pending.push({ resolve, reject })); } };
   const $ = id => { if (id === 'replay-player') return video; if (!elements.has(id)) elements.set(id, { value: id === 'dvr-channel' ? '201' : 'dvr-id', hidden: true, attributes: {}, classList: { toggle() {} }, setAttribute(name, value) { this.attributes[name] = value; } }); return elements.get(id); };
-  const context = vm.createContext({ state, $, setButtonIcon, syncPlaybackStatus() {}, AbortController, setTimeout(fn, ms) { const id = ++timerId; timers.set(id, { fn, ms }); return id; }, clearTimeout(id) { timers.delete(id); }, hasPlaybackSelection: () => true, navigator: { userAgent: safari ? 'iPhone Safari/' : 'Chrome/' }, Date, Math, Number, URL, URLSearchParams, location: { href: 'http://test/' }, appPath: x => x, wallTime: String,
+  const context = vm.createContext({ state, $, setButtonIcon, syncPlaybackStatus() {}, cancelReplayHold() {}, replayHoldButtons: [], AbortController, setTimeout(fn, ms) { const id = ++timerId; timers.set(id, { fn, ms }); return id; }, clearTimeout(id) { timers.delete(id); }, hasPlaybackSelection: () => true, navigator: { userAgent: safari ? 'iPhone Safari/' : 'Chrome/' }, Date, Math, Number, URL, URLSearchParams, location: { href: 'http://test/' }, appPath: x => x, wallTime: String,
     segmentBounds: item => ({ start: Date.parse(item.start), end: Date.parse(item.start) + item.duration * 1000 }), updateCursor() {}, syncReplayToggle() {}, setPlaybackNotice: (...value) => notices.push(value) });
   for (const [begin, end] of [['function clearReplay(', 'function syncReplayToggle('], ['function syncReplayMute(', 'function selectTime('], ['function selectTime(', 'function setPlaybackNotice(']]) vm.runInContext(script.slice(script.indexOf(begin), script.indexOf(end)), context);
   function readyHls(time = 0) { Object.assign(video, { currentSrc: video.src, currentTime: time, readyState: 4, seeking: false, seekable: { length: 1, start: () => 0, end: () => 30 } }); context.finishHlsStart(); }
@@ -202,11 +202,11 @@ test('HLS fallback and clear send bounded stop requests; stale errors cannot rep
   const current = h.video.src; h.context.handlePlaybackError(); assert.equal(h.video.src, current);
   await h.context.playAt(h.start + 10_000); h.context.clearReplay();
   assert.equal(stopped.length, 2); assert.equal(h.video.hidden, true); assert.equal(h.state.playBounds, null);
-  let pagehide, stops = 0, clears = 0;
-  const lifecycle = { state: {}, window: { addEventListener(name, fn) { assert.equal(name, 'pagehide'); pagehide = fn; } }, stopHlsPreview() { stops++; }, clearReplay() { clears++; } };
+  let pagehide, stops = 0, clears = 0, cancels = 0;
+  const lifecycle = { state: {}, window: { addEventListener(name, fn) { assert.equal(name, 'pagehide'); pagehide = fn; } }, cancelReplayHold() { cancels++; }, stopHlsPreview() { stops++; }, clearReplay() { clears++; } };
   vm.runInNewContext(script.split('\n').find(line => line.startsWith("window.addEventListener('pagehide'")), lifecycle);
-  pagehide(); assert.equal(stops, 1, 'DVR stop remains bound to pagehide');
-  lifecycle.state.mediaLive = {}; pagehide(); assert.equal(clears, 1, 'WebRTC closes and returns to a reconnectable replay state');
+  pagehide(); assert.equal(stops, 1, 'DVR stop remains bound to pagehide'); assert.equal(cancels, 1, 'pagehide cancels a pending replay gesture');
+  lifecycle.state.mediaLive = {}; pagehide(); assert.equal(clears, 1, 'WebRTC closes and returns to a reconnectable replay state'); assert.equal(cancels, 2, 'live pagehide also cancels a pending gesture');
 });
 
 test('pausing HLS beyond the idle limit preserves the picture and exact cursor, then reopens historical playback', async () => {
