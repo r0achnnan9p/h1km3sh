@@ -66,8 +66,14 @@ test('browser tabs, Windows installed PWAs, desktop, native fullscreen and zoom 
 });
 
 test('shell and all layout panes share height; safe-area padding is not a shell offset', () => {
-  assert.match(css, /\.standalone-viewport \.console-shell\s*\{\s*position: absolute; inset: 0 0 auto; height: var\(--app-viewport-height\);/);
-  assert.match(css, /\.standalone-viewport \.precision-layout #view-replay\.replay-expanded\s*\{\s*position: absolute; inset: 0 0 auto; height: var\(--app-viewport-height\);/);
+  const shell = css.match(/\.standalone-viewport \.console-shell\s*\{([^}]+)\}/)?.[1];
+  const expanded = css.match(/\.standalone-viewport \.precision-layout #view-replay\.focus-replay\.replay-expanded\s*\{([^}]+)\}/)?.[1];
+  for (const pane of [shell, expanded]) {
+    assert.ok(pane);
+    assert.match(pane, /position:\s*absolute;\s*inset:\s*0 0 auto;\s*height:\s*var\(--app-viewport-height\);/);
+    assert.doesNotMatch(pane, /--safe-|--status-bar-blur-gap|padding|transform/, 'safe areas belong to content, never another shell offset');
+  }
+  assert.match(css, /body\.precision-layout\[data-view='replay'\] \.workspace-main\s*\{\s*height:\s*var\(--app-viewport-height\);/);
   for (const line of css.split('\n').filter(line => line.includes('100dvh'))) {
     assert.ok(line.includes('--app-viewport-height: 100dvh') || line.includes('.app-dialog'), 'unshared app viewport: ' + line);
   }

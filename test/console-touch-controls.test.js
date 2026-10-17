@@ -63,7 +63,7 @@ test('failed rename leaves sheet open and typed name intact with actionable serv
 });
 test('all console states share shell, responsive viewport, explicit range and search controls', () => {
   const html = statusDashboardPage('/zl-camera');
-  for (const id of ['boot-view', 'auth-view', 'login-form', 'setup-form', 'view-replay', 'view-library', 'view-tasks', 'view-settings', 'edit-range', 'output-search', 'connection-banner']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['boot-view', 'auth-view', 'login-form', 'setup-form', 'view-replay', 'view-library', 'view-tasks', 'view-settings', 'edit-in', 'edit-out', 'output-search', 'connection-banner']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(html, /viewport-fit=cover/); assert.doesNotMatch(script, /window\.(prompt|confirm)\(/);
   assert.match(script, /dialog\.showModal\(\)/); assert.match(script, /event\.isComposing/);
 });

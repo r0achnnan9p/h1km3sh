@@ -1,12 +1,13 @@
 import { createPrecisionTimeline } from './precision-timeline.js';
 import { createOutputDownload } from './output-download.js';
-import { iconSvg, setButtonIcon, createSettingsRow, formatClipDuration, createPlaybackChrome, createSlidingNavigation } from './ui-primitives.js';
+import { iconSvg, setButtonIcon, createSettingsRow, formatClipDuration, createSlidingNavigation } from './ui-primitives.js';
 import { createUploadAccounts } from './upload-accounts.js';
 import { createOutputPlayers } from './output-player.js';
 import { activeDialog, openDialog, labelledInput, normalizeMp4Name, rangeTimeMs, openCalendar, enhanceTimeInput } from './touch-controls.js';
 import { setupDebugMark } from './debug-mark.js';
 import { startMediaMtxLive } from './mediamtx-live-player.js';
-import { findCoverageGap, countCoverageGaps, listCoverageGaps } from './playback-coverage.js';
+import { listCoverageGaps, formatCoverageGap } from './playback-coverage.js';
+import { createReplayControls } from './replay-controls.js';
 import { bindPressRepeat } from './press-repeat.js';
 import { taskProgressPresentation, taskStageLabel, taskProgressCaption, uploadProgressCaption, createTaskFeed, createCollectionFeed, createTransferSampler, fmtBps, formatTransferBytes, formatEta } from './task-presentation.js';
 
@@ -148,6 +149,7 @@ function loggedOut(message = '') {
   if (state.mediaLive || state.lastFramePending || state.previewMode === 'last-frame') clearReplay();
   if (typeof uploadAccounts !== 'undefined') void uploadAccounts.stop();
   delete document.body.dataset.view;
+  if (typeof syncReplayControls === 'function') syncReplayControls();
   outputRequest++; stateRequest++; consoleSession++; outputDetail?.close(); outputDetail = null; outputPlayers.destroy(); outputCards.clear(); outputFeed?.clear(); outputFilter = null; $('output-list').replaceChildren();
   if (configEditor) suspendedConfigEditor = configEditor.resume;
   settingsInline?.close();
@@ -237,6 +239,7 @@ function navigate(view, updateHistory = true) {
     document.querySelectorAll('[data-view]').forEach(button => { button.classList.toggle('active', button.dataset.view === view); button.setAttribute('aria-current', button.dataset.view === view ? 'page' : 'false'); });
     if (changedView) { window.scrollTo(0, 0); const scrollRoot = document.querySelector('.workspace-main'); if (scrollRoot) scrollRoot.scrollTop = 0; }
     if (typeof slidingNavigation !== 'undefined') slidingNavigation?.sync();
+    if (typeof syncReplayControls === 'function') syncReplayControls();
     if (view === 'library') { outputFeed?.resume(); }
     if (view === 'library') refreshOutputs().catch(error => notify(error.message, true));
     if (view === 'tasks') refreshState().catch(() => {});
@@ -258,7 +261,58 @@ function navigate(view, updateHistory = true) {
 
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
 const slidingNavigation = createSlidingNavigation({ nav: document.querySelector('.mobile-nav'), activate: view => navigate(view) });
-const playbackChrome = createPlaybackChrome({ container: $('player-wrap'), video: $('replay-player'), interactionRoot: $('view-replay'), isBusy: () => state.dragging || Boolean(state.holdSeek) || state.busy || Boolean(activeDialog?.open) });
+function setupReplayControls() {
+  const view = $('view-replay'), panel = $('replay-control-panel'), topbar = view.querySelector('.replay-topbar');
+  const applyMode = mode => {
+    view.dataset.replayMode = mode;
+    $('replay-selection-editor').hidden = mode !== 'select';
+    for (const value of ['watch', 'select']) $(`replay-mode-${value}`).setAttribute('aria-pressed', String(value === mode));
+  };
+  const applyVisibility = visible => {
+    view.dataset.chromeIdle = String(!visible);
+    for (const node of [panel, topbar]) {
+      node.inert = !visible;
+      if (visible) node.removeAttribute('aria-hidden');
+      else node.setAttribute('aria-hidden', 'true');
+    }
+  };
+  const controller = createReplayControls({
+    onModeChange: applyMode, onVisibilityChange: applyVisibility,
+    canHide: () => {
+      const focused = document.activeElement;
+      const editing = focused instanceof HTMLElement && (focused.isContentEditable || focused.matches('input, textarea, select'));
+      const keyboardFocus = view.contains(focused) && focused?.matches?.(':focus-visible');
+      return !state.dragging && !state.holdSeek && !state.busy && !activeDialog?.open && !editing && !keyboardFocus;
+    },
+  });
+  applyMode(controller.mode); applyVisibility(controller.visible);
+  const consume = event => { event.preventDefault(); event.stopImmediatePropagation(); };
+  view.addEventListener('pointerdown', event => { if (controller.pointerDown(event)) consume(event); }, true);
+  for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, event => { if (controller.pointerUp(event)) consume(event); }, true);
+  view.addEventListener('click', event => { if (controller.consumeClick(event)) consume(event); }, true);
+  view.addEventListener('pointermove', event => { if (event.pointerType === 'mouse') controller.show(); }, { passive: true });
+  view.addEventListener('focusin', () => controller.show());
+  view.addEventListener('focusout', () => controller.show());
+  // Wake before Tab navigation and keyboard shortcuts; hidden controls are inert.
+  document.addEventListener('keydown', () => { if (document.body.dataset.view === 'replay') controller.show(); }, true);
+  for (const mode of ['watch', 'select']) $(`replay-mode-${mode}`).addEventListener('click', () => controller.setMode(mode));
+  for (const id of ['date-select', 'playback-source', 'camera-select', 'dvr-select', 'dvr-channel']) $(id).addEventListener('change', () => controller.reset(), true);
+  window.addEventListener('blur', () => { controller.reset(); controller.hold('window'); });
+  window.addEventListener('focus', () => { controller.release('window'); syncReplayControls(); });
+  window.addEventListener('pagehide', () => { controller.setEnabled(false); controller.reset(); });
+  for (const event of ['resize', 'orientationchange', 'pageshow']) window.addEventListener(event, syncReplayControls);
+  document.addEventListener('visibilitychange', syncReplayControls);
+  return controller;
+}
+const replayControls = setupReplayControls();
+function syncReplayControls() {
+  const active = document.body.dataset.view === 'replay' && !document.hidden;
+  const view = $('view-replay');
+  const fullscreen = document.fullscreenElement === view || view.classList.contains('replay-expanded');
+  const landscape = window.matchMedia('(orientation: landscape) and (max-height: 540px) and (min-width: 568px) and (max-width: 1023px)').matches;
+  replayControls.setEnabled(active && (fullscreen || landscape));
+  if (!active) replayControls.reset();
+}
 document.querySelector('.skip-link')?.addEventListener('click', event => { event.preventDefault(); $('workspace-content').focus(); });
 window.addEventListener('popstate', () => { if (!$('console-shell').hidden && location.hash.slice(1) !== document.body.dataset.view) navigate(location.hash.slice(1), false); });
 
@@ -588,7 +642,7 @@ function updateBoundaryControls() {
   const window = timelineWindow(), day = dateStart(state.date);
   for (const boundary of ['in', 'out']) {
     const ms = state[boundary === 'in' ? 'inMs' : 'outMs'];
-    $(`boundary-${boundary}-time`).textContent = boundaryLabel(ms);
+    $(`boundary-${boundary}-time`).textContent = ms === null ? '--:--:--' : boundaryLabel(ms);
     const markTime = $(`mark-${boundary}-time`); if (markTime) markTime.textContent = ms === null ? '--:--:--' : boundaryLabel(ms);
     const handle = $(`boundary-${boundary}`); handle.hidden = ms === null || ms < window.start || ms > window.end;
     if (!handle.hidden) { handle.style.left = `${timelinePercent(ms, window.start, window.span)}%`; handle.setAttribute('aria-valuenow', String((ms - day) / 1000)); handle.setAttribute('aria-valuetext', boundaryLabel(ms)); }
@@ -636,27 +690,12 @@ function updateSelection() {
   const duration = $('selection-duration'); if (duration) { const seconds = valid ? Math.round((outMs - inMs) / 1000) : 0; duration.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }
   const badge = $('selection-status');
   if (badge) { badge.textContent = valid ? '已选择' : inMs !== null || outMs !== null ? '待完成' : '未选择'; badge.classList.toggle('ready', valid); }
-  const gap = valid ? findCoverageGap(state.segments, inMs, outMs) : null;
-  const warning = $('selection-gap-warning');
-  if (warning) {
-    const count = gap && state.playbackSource === 'mediamtx' ? countCoverageGaps(state.segments, inMs, outMs) : 0;
-    warning.hidden = count === 0; $('selection-gap-count').textContent = String(count);
-    warning.disabled = state.busy;
-    warning.setAttribute('aria-label', `查看 ${count} 处录像中断的时间范围`);
-    warning.title = `查看 ${count} 处录像中断的时间范围`;
-  }
   const exportButton = $('export-range'), selectionHelp = $('selection-help');
   exportButton.disabled = !valid || !hasPlaybackSelection() || state.busy;
   const cancel = $('cancel-export'); if (cancel) cancel.hidden = !state.busy;
   exportButton.title = valid ? '' : '请先设置有效的入点和出点';
   selectionHelp.classList.remove('warning');
-  selectionHelp.textContent = state.playbackSource === 'dvr'
-    ? !hasPlaybackSelection() ? '先选择录像机和通道。' : ''
-    : !valid
-    ? ''
-    : gap
-      ? '选段含录像中断。点击警告查看每段时间，确认后可导出已有录像。'
-      : '';
+  selectionHelp.textContent = state.playbackSource === 'dvr' && !hasPlaybackSelection() ? '先选择录像机和通道。' : '';
   selectionHelp.hidden = !selectionHelp.textContent;
   if (inMs === null || outMs === null || outMs <= inMs) { overlay.hidden = true; $('overview-selection').hidden = true; return; }
   const window = timelineWindow(), start = Math.max(inMs, window.start), end = Math.min(outMs, window.end);
@@ -733,7 +772,7 @@ function syncReplayToggle() {
   const live = $('go-live'); live.hidden = state.previewMode === 'live' && !state.previewFailed && !$('replay-player').error && !$('replay-player').ended; live.disabled = !hasPlaybackSelection();
   live.setAttribute('aria-pressed', String(state.previewMode === 'live'));
   const isPlaying = visible && !video.paused && !video.ended && !video.error && !state.previewFailed;
-  button.hidden = !visible;
+  button.hidden = true; // Legacy state hook; the shared transport is the visible playback control.
   button.setAttribute('aria-pressed', String(isPlaying));
   const playbackLabel = `${isPlaying ? '暂停' : '播放'}${state.previewMode === 'live' ? '直播' : '录像'}`;
   button.setAttribute('aria-label', playbackLabel); button.title = playbackLabel;
@@ -1413,7 +1452,7 @@ $('replay-player').addEventListener('error', () => {
   if ($('replay-player').error) handlePlaybackError();
 });
 for (const boundary of ['in', 'out']) {
-  $(`edit-${boundary}`).addEventListener('click', () => openBoundaryEditor(boundary));
+  $(`edit-${boundary}`).addEventListener('click', () => openRangeEditor(boundary));
   $(`boundary-${boundary}`).addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation(); if (event.repeat) return;
@@ -1516,11 +1555,6 @@ $('export-range').addEventListener('click', async () => {
   if (coverage.missingIntervals.length) { confirmIncompleteExport(coverage, selection); return; }
   await submitExportSelection(selection);
 });
-$('selection-gap-warning').addEventListener('click', () => {
-  if (state.busy || !hasPlaybackSelection()) return;
-  const coverage = selectedGapCoverage();
-  if (coverage.missingIntervals.length) confirmIncompleteExport(coverage, captureExportSelection());
-});
 $('cancel-export').addEventListener('click', () => cancelExportSubmission());
 
 function captureExportSelection() {
@@ -1536,7 +1570,7 @@ function isExportSelectionCurrent(selection) {
 function selectedGapCoverage() {
   const gaps = state.playbackSource === 'mediamtx' ? listCoverageGaps(state.segments, state.inMs, state.outMs) : [];
   return { missingSeconds: gaps.reduce((total, gap) => total + (gap.end - gap.start) / 1000, 0),
-    missingIntervals: gaps.map(gap => ({ start: wallTime(gap.start), end: wallTime(gap.end) })) };
+    missingIntervals: gaps.map(gap => ({ start: wallTime(gap.start), end: wallTime(gap.end), durationSeconds: (gap.end - gap.start) / 1000 })) };
 }
 function cancelExportSubmission(silent = false) {
   if (!exportSubmission) return;
@@ -1573,7 +1607,7 @@ async function submitExportSelection(selection, acceptGaps = false) {
     clearTimeout(timer);
     if (exportSubmission === pending) exportSubmission = null;
     state.busy = false;
-    if (!button.classList.contains('submitted')) setButtonIcon(button, 'download', '导出选中片段');
+    if (!button.classList.contains('submitted')) { setButtonIcon(button, 'download', '导出选中片段'); button.append('导出'); }
     updateSelection();
   }
   if (newCoverage) confirmIncompleteExport(newCoverage, selection);
@@ -1581,16 +1615,19 @@ async function submitExportSelection(selection, acceptGaps = false) {
 }
 function flashSubmitted(button, icon = 'download', label = '导出选中片段') {
   clearTimeout(button.submittedTimer); setButtonIcon(button, 'check', '已提交'); button.classList.add('submitted');
-  button.submittedTimer = setTimeout(() => { button.classList.remove('submitted'); setButtonIcon(button, icon, label); }, 1200);
+  if (button.id === 'export-range') button.append('已提交');
+  button.submittedTimer = setTimeout(() => { button.classList.remove('submitted'); setButtonIcon(button, icon, label); if (button.id === 'export-range') button.append('导出'); }, 1200);
 }
 function confirmIncompleteExport(coverage, selection) {
   const intervals = coverage?.missingIntervals || [];
   const sheet = openDialog('选段含录像中断', '以下时间没有录像。继续导出将跳过这些部分，只保留已有画面。', { trackChanges: false });
   const list = document.createElement('div'); list.className = 'gap-intervals'; list.setAttribute('aria-label', '录像中断时间范围');
   for (const interval of intervals) {
-    const row = document.createElement('p');
-    row.textContent = interval.start + ' → ' + interval.end;
-    list.append(row);
+    const row = document.createElement('p'); row.className = 'gap-interval';
+    const { rangeText, durationText } = formatCoverageGap(interval);
+    const range = document.createElement('span'); range.className = 'gap-interval-range'; range.textContent = rangeText;
+    const duration = document.createElement('span'); duration.className = 'gap-interval-duration'; duration.textContent = durationText;
+    row.append(range, duration); list.append(row);
   }
   sheet.content.append(list);
   addButton(sheet.actions, '取消', 'quiet-button', () => sheet.close());
@@ -2701,7 +2738,7 @@ function openPlaybackTimeEditor() {
   });
   input.focus();
 }
-function openRangeEditor() {
+function openRangeEditor(focusBoundary = 'in') {
   const date = state.date, context = playbackContextKey();
   const sheet = openDialog('编辑选段', date);
   const fields = document.createElement('div'); fields.className = 'time-fields'; sheet.content.append(fields);
@@ -2723,7 +2760,7 @@ function openRangeEditor() {
     setTimelineWindow(state.inMs + Math.min(state.outMs - state.inMs, timelineWindow().span) / 2);
     updateSelection(); sheet.close();
   } catch (error) { sheet.error.textContent = error.message; } });
-  start.focus();
+  (focusBoundary === 'out' ? end : start).focus();
 }
 function recoverOutputRename(file) {
   if (!file.renamePending) return;
@@ -2856,7 +2893,6 @@ function reloadApplication() {
 function setupTouchControls() {
   document.querySelectorAll('input[type="password"]').forEach(input => { const wrapper = document.createElement('div'); wrapper.className = 'password-control'; input.before(wrapper); wrapper.append(input); const toggle = addButton(wrapper, '显示', '', () => { const visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; toggle.textContent = visible ? '隐藏' : '显示'; toggle.setAttribute('aria-pressed', String(visible)); }); toggle.setAttribute('aria-label', '显示或隐藏密码'); toggle.setAttribute('aria-pressed', 'false'); });
   updateOutputSort();
-  $('edit-range').addEventListener('click', openRangeEditor);
   $('timeline-time-editor').addEventListener('click', openPlaybackTimeEditor);
   document.querySelectorAll('[data-app-reload]').forEach(button => button.addEventListener('click', reloadApplication));
   $('playback-context').addEventListener('click', openPlaybackDate);
@@ -2898,7 +2934,6 @@ boot();
 
 // Move shared overlays into the fullscreen subtree; top-layer membership cannot be fixed with z-index.
 const replayOverlayHome = $('replay-overlays')?.parentElement;
-let syncDesktopReplayLayout = null;
 let replayFullscreenPending = false, replayFullscreenGeneration = 0, replayFullscreenWanted = false, replayFullscreenExit = null;
 function syncReplayFullscreen() {
   const view = $('view-replay'), overlays = $('replay-overlays');
@@ -2908,7 +2943,7 @@ function syncReplayFullscreen() {
   const parent = expanded ? view : replayOverlayHome;
   if (overlays && parent && overlays.parentElement !== parent) parent.append(overlays);
   $('replay-fullscreen')?.setAttribute('aria-label', expanded ? '退出全屏回放' : '全屏回放');
-  syncDesktopReplayLayout?.();
+  if (typeof syncReplayControls === 'function') syncReplayControls();
 }
 function cancelReplayFullscreenEntry() {
   replayFullscreenGeneration++; replayFullscreenWanted = false;
@@ -2951,26 +2986,3 @@ document.addEventListener('fullscreenchange', () => {
   if (document.fullscreenElement === $('view-replay') && (!replayFullscreenWanted || document.body.dataset.view !== 'replay')) void leaveReplayFullscreen();
 });
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && !activeDialog?.open && !event.defaultPrevented) void leaveReplayFullscreen(); });
-
-// 断点只搬运同一组控件，不创建第二份选择状态或 API 请求入口。
-function setupDesktopReplayLayout() {
-  const side = document.querySelector('#view-replay .selection-panel');
-  const quick = document.querySelector('.playback-quick-controls');
-  const marks = document.querySelector('#view-replay .mark-controls');
-  const slot = document.createElement('div'); slot.className = 'desktop-replay-controls'; side.insertBefore(slot, side.firstChild);
-  const placements = [quick, marks].map(node => ({ node, parent: node.parentNode, next: node.nextSibling }));
-  const sync = () => {
-    const view = $('view-replay');
-    const desktop = window.innerWidth >= 1024 && document.fullscreenElement !== view && !view.classList.contains('replay-expanded');
-    for (const entry of placements) {
-      const parent = desktop ? slot : entry.parent;
-      if (entry.node.parentNode !== parent) {
-        if (desktop) parent.append(entry.node);
-        else parent.insertBefore(entry.node, entry.next?.parentNode === parent ? entry.next : null);
-      }
-    }
-    slot.hidden = !desktop;
-  };
-  syncDesktopReplayLayout = sync; window.addEventListener('resize', sync); sync();
-}
-setupDesktopReplayLayout();

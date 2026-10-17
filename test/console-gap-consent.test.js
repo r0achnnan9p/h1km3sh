@@ -1,5 +1,5 @@
 import { formatClipDuration, setButtonIcon } from '../public/ui-primitives.js';
-import { findCoverageGap, countCoverageGaps, listCoverageGaps } from '../public/playback-coverage.js';
+import { listCoverageGaps, formatCoverageGap } from '../public/playback-coverage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -13,8 +13,8 @@ const gapSegments = [
   { startMs: inMs + 50_000, endMs: outMs },
 ];
 const expectedRows = [
-  '2026-01-01 20:00:10 → 2026-01-01 20:00:20',
-  '2026-01-01 20:00:40 → 2026-01-01 20:00:50',
+  { rangeText: '20:00:10 → 20:00:20', durationText: '10秒' },
+  { rangeText: '20:00:40 → 20:00:50', durationText: '10秒' },
 ];
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -32,6 +32,8 @@ class Element {
     add: name => this.classes.add(name), remove: name => this.classes.delete(name), contains: name => this.classes.has(name),
     toggle: (name, enabled) => { if (enabled) this.classes.add(name); else this.classes.delete(name); },
   };
+  get innerHTML() { return this.html || ''; }
+  set innerHTML(value) { this.html = value; this.children = []; this.textContent = ''; }
   append(...children) { this.children.push(...children); }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name); }
@@ -40,14 +42,17 @@ class Element {
 }
 function harness({ gaps = true, source = 'mediamtx' } = {}) {
   const elements = new Map(), sheets = [], requests = [], notices = [], logouts = [];
-  const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
+  const $ = id => {
+    if (['selection-gap-warning', 'selection-gap-count'].includes(id)) return null;
+    if (!elements.has(id)) { const element = new Element(); element.id = id; elements.set(id, element); } return elements.get(id);
+  };
   $('dvr-select').value = 'recorder-a'; $('dvr-channel').value = '201';
   const state = { playbackSource: source, selectedCamera: 'camera-a', date: '2026-01-01', configRevision: 1,
     inMs, outMs, segments: gaps ? gapSegments : [{ startMs: inMs, endMs: outMs }], busy: false, timelineSpanSeconds: 300 };
   const timers = new Map(); let timerId = 0, refreshes = 0;
   let respond = async () => Response.json({ success: true, taskId: 'task-a', status: 'queued' });
   const context = vm.createContext({
-    $, state, formatClipDuration, setButtonIcon, findCoverageGap, countCoverageGaps, listCoverageGaps,
+    $, state, formatClipDuration, setButtonIcon, listCoverageGaps, formatCoverageGap,
     AbortController, consoleSession: 1, exportSubmission: null, pendingTaskFocus: null,
     dateParts: new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }),
     document: { body: { dataset: { view: 'replay' } }, createElement: () => new Element() },
@@ -103,23 +108,38 @@ function assertIdle(h) {
   assert.equal([...h.timers.values()].some(timer => timer.delay === 20_000), false);
 }
 
-for (const trigger of ['selection-gap-warning', 'export-range']) {
-  test(`${trigger} immediately lists every known interruption without a network request`, async () => {
-    const h = harness();
-    assert.equal(h.$('selection-gap-warning').hidden, false);
-    assert.equal(h.$('selection-gap-count').textContent, '2');
-    assert.equal(h.$('selection-gap-warning').getAttribute('aria-label'), '查看 2 处录像中断的时间范围');
-    const clicked = h.$(trigger).click();
-    assert.equal(h.sheets.length, 1, 'the dialog appears synchronously, before waiting for a server response');
-    await clicked;
-    assert.equal(h.requests.length, 0);
-    const sheet = h.sheets[0];
-    assert.deepEqual(sheet.content.children[0].children.map(row => row.textContent), expectedRows);
-    assert.match(sheet.copy, /只保留已有画面/);
-    assert.equal(h.state.busy, false); assert.equal(h.$('cancel-export').hidden, true);
-    assert.deepEqual(sheet.actions.children.map(button => button.textContent), ['取消', '接受中断并导出']);
+function gapRows(sheet) {
+  const list = sheet.content.children.find(node => node.className === 'gap-intervals');
+  assert.ok(list, 'the confirmation must expose its interruption list');
+  return list.children.map(row => {
+    assert.equal(row.className, 'gap-interval');
+    const range = row.children.find(node => node.className === 'gap-interval-range');
+    const duration = row.children.find(node => node.className === 'gap-interval-duration');
+    assert.ok(range && duration, 'each interruption has a separate time range and duration');
+    return { rangeText: range.textContent, durationText: duration.textContent };
   });
 }
+
+test('export immediately lists every known interruption and its duration without a network request', async () => {
+  const h = harness();
+  const clicked = h.$('export-range').click();
+  assert.equal(h.sheets.length, 1, 'the dialog appears synchronously, before waiting for a server response');
+  await clicked;
+  assert.equal(h.requests.length, 0);
+  const sheet = h.sheets[0];
+  assert.deepEqual(gapRows(sheet), expectedRows);
+  assert.match(sheet.copy, /只保留已有画面/);
+  assert.equal(h.state.busy, false); assert.equal(h.$('cancel-export').hidden, true);
+  assert.deepEqual(sheet.actions.children.map(button => button.textContent), ['取消', '接受中断并导出']);
+});
+
+test('cached interruption confirmation keeps fractional duration before clock labels lose precision', async () => {
+  const h = harness();
+  h.state.segments = [{ startMs: inMs, endMs: inMs + 10250 }, { startMs: inMs + 12125, endMs: outMs }];
+  await h.$('export-range').click();
+  assert.deepEqual(gapRows(h.sheets[0]), [{ rangeText: '20:00:10 → 20:00:12', durationText: '1.875秒' }]);
+  assert.equal(h.requests.length, 0); assertIdle(h);
+});
 
 test('cancelling the interruption dialog preserves the selected range and submits nothing', async () => {
   const h = harness(); await h.$('export-range').click();
@@ -136,7 +156,7 @@ test('explicit acceptance sends the captured selection once and records the retu
   await sheet.actions.children[1].click();
   assert.equal(sheet.closed, true); assert.equal(h.requests.length, 1);
   assert.equal(h.state.busy, true); assert.equal(h.$('cancel-export').hidden, false);
-  assert.equal(h.$('selection-gap-warning').disabled, true);
+  assert.equal(h.$('export-range').disabled, true);
   assert.deepEqual(h.requests[0].payload, { source: 'mediamtx', camera: 'camera-a', mode: 'copy',
     start: '2026-01-01 20:00:00', end: '2026-01-01 20:01:00', acceptGaps: true });
   resolve(Response.json({ success: true, taskId: 'accepted-a' })); await first;
@@ -161,7 +181,6 @@ for (const [name, change] of [
 
 test('a complete MediaMTX range submits directly without accepting gaps or stale DVR fields', async () => {
   const h = harness({ gaps: false });
-  assert.equal(h.$('selection-gap-warning').hidden, true);
   await h.$('export-range').click();
   assert.equal(h.sheets.length, 0); assert.equal(h.requests.length, 1);
   assert.deepEqual(h.requests[0].payload, { source: 'mediamtx', camera: 'camera-a', mode: 'copy', start: '2026-01-01 20:00:00', end: '2026-01-01 20:01:00' });
@@ -219,12 +238,15 @@ test('a network failure after acceptance restores controls and requires a fresh 
 });
 
 test('new authoritative server gaps open confirmation after busy state settles', async () => {
-  const h = harness({ gaps: false }), coverage = { missingSeconds: 5, missingIntervals: [{ start: '2026-01-01 20:00:25', end: '2026-01-01 20:00:30' }] };
+  const h = harness({ gaps: false }), coverage = { missingSeconds: 5.125, missingIntervals: [{
+    start: '2026-01-01 20:00:25', end: '2026-01-01 20:00:30', durationSeconds: 5.125,
+    startMs: Date.parse('2026-01-01T20:00:25.250Z'), endMs: Date.parse('2026-01-01T20:00:30.375Z'),
+  }] };
   h.setFetch(async () => Response.json({ code: 'MEDIAMTX_GAPS', coverage, error: 'confirm missing footage' }, { status: 409 }));
   await h.$('export-range').click();
   assert.equal(h.requests.length, 1); assert.equal('acceptGaps' in h.requests[0].payload, false);
   assert.equal(h.sheets.length, 1); assertIdle(h);
-  assert.equal(h.sheets[0].content.children[0].children[0].textContent, '2026-01-01 20:00:25 → 2026-01-01 20:00:30');
+  assert.deepEqual(gapRows(h.sheets[0]), [{ rangeText: '20:00:25 → 20:00:30', durationText: '5.125秒' }]);
 });
 
 for (const [name, change] of [
@@ -235,7 +257,7 @@ for (const [name, change] of [
   const h = harness({ gaps: false }); let resolve;
   h.setFetch(() => new Promise(done => { resolve = done; }));
   const pending = h.$('export-range').click(); change(h);
-  resolve(Response.json({ code: 'MEDIAMTX_GAPS', coverage: { missingIntervals: expectedRows }, error: 'gap' }, { status: 409 }));
+  resolve(Response.json({ code: 'MEDIAMTX_GAPS', coverage: { missingIntervals: [{ start: '2026-01-01 20:00:10', end: '2026-01-01 20:00:20', durationSeconds: 10 }] }, error: 'gap' }, { status: 409 }));
   await pending; assert.equal(h.sheets.length, 0); assertIdle(h);
   assert.match(h.notices.at(-1)[0], /返回回放页查看并确认/);
 });
@@ -266,7 +288,7 @@ test('a late success from a previous console session does not focus a task or sh
 test('invalid or missing selections never show gap consent or submit an export', async () => {
   for (const change of [h => { h.state.inMs = null; }, h => { h.state.outMs = inMs; }, h => { h.state.selectedCamera = ''; }]) {
     const h = harness(); change(h); h.context.updateSelection();
-    await h.$('export-range').listeners.get('click')(); h.$('selection-gap-warning').click();
+    await h.$('export-range').listeners.get('click')();
     assert.equal(h.requests.length, 0); assert.equal(h.sheets.length, 0);
   }
 });

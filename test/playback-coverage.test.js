@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findCoverageGap, countCoverageGaps, listCoverageGaps } from '../public/playback-coverage.js';
+import { findCoverageGap, countCoverageGaps, listCoverageGaps, formatCoverageGap } from '../public/playback-coverage.js';
 
 test('本地录像连续覆盖时没有缺口', () => {
   assert.equal(findCoverageGap([
@@ -49,4 +49,59 @@ test('gap list exposes every clipped interval in order instead of a combined dur
   assert.deepEqual(listCoverageGaps([], 2, 1), []);
   assert.deepEqual(listCoverageGaps([], NaN, 1), []);
   assert.deepEqual(listCoverageGaps([], 0, 1), [{ start: 0, end: 1 }]);
+});
+
+test('gap presentation uses recording clock time and retains millisecond duration for cached gaps', () => {
+  const start = Date.parse('2026-01-15T11:02:10.250Z');
+  assert.deepEqual(formatCoverageGap({ start, end: start + 1875 }), {
+    rangeText: '19:02:10 → 19:02:12', durationText: '1.875秒',
+  });
+});
+
+test('server gap strings remain authoritative while numeric wall-axis bounds preserve exact duration', () => {
+  // Server coverage bounds use a wall-clock axis, unlike the browser timeline's UTC instants.
+  const startMs = Date.parse('2026-01-15T19:02:10.250Z');
+  assert.deepEqual(formatCoverageGap({ start: '2026-01-15 19:02:10', end: '2026-01-15 19:02:12',
+    startMs, endMs: startMs + 1875, durationSeconds: 1.875 }), {
+    rangeText: '19:02:10 → 19:02:12', durationText: '1.875秒',
+  });
+  assert.deepEqual(formatCoverageGap({ start: '2026-01-15 19:02:10', end: '2026-01-15 19:02:12',
+    startMs, endMs: startMs + 1875 }), {
+    rangeText: '19:02:10 → 19:02:12', durationText: '1.875秒',
+  });
+  assert.deepEqual(formatCoverageGap({ start: '2026-01-15 19:02:10', end: '2026-01-15 19:02:12' }), {
+    rangeText: '19:02:10 → 19:02:12', durationText: '2秒',
+  });
+});
+
+test('gap duration stays readable from milliseconds through hours without floating point tails', () => {
+  const start = Date.parse('2026-01-15T00:00:00+08:00');
+  for (const [milliseconds, expected] of [[1, '0.001秒'], [1000, '1秒'], [12500, '12.5秒'],
+    [60000, '1分00秒'], [62000, '1分02秒'], [62025, '1分02.025秒'],
+    [3599999, '59分59.999秒'], [3600000, '1小时00分00秒'], [3662050, '1小时01分02.05秒']]) {
+    assert.equal(formatCoverageGap({ start, end: start + milliseconds }).durationText, expected);
+  }
+  const interval = { start: '2026-01-15 00:00:00', end: '2026-01-15 00:01:00' };
+  assert.equal(formatCoverageGap({ ...interval, durationSeconds: 59.999999999 }).durationText, '1分00秒');
+  assert.equal(formatCoverageGap({ ...interval, durationSeconds: 0.0001 }).durationText, '小于0.001秒');
+});
+
+test('midnight gap labels show the next day without repeating a calendar date', () => {
+  const start = Date.parse('2026-12-31T23:59:50+08:00'), end = start + 30000;
+  const expected = { rangeText: '23:59:50 → 次日 00:00:20', durationText: '30秒' };
+  assert.deepEqual(formatCoverageGap({ start, end }), expected);
+  assert.deepEqual(formatCoverageGap({ start: '2026-12-31 23:59:50', end: '2027-01-01 00:00:20' }), expected);
+  assert.deepEqual(formatCoverageGap({ start, end: end + 86400000 }), {
+    rangeText: '23:59:50 → 2天后 00:00:20', durationText: '24小时00分30秒',
+  });
+});
+
+test('clock-only gap presentation handles zoned timestamps and unavailable fields without claiming zero loss', () => {
+  assert.deepEqual(formatCoverageGap({ start: '2026-01-15T11:02:10Z', end: '2026-01-15T19:02:12+08:00' }), {
+    rangeText: '19:02:10 → 19:02:12', durationText: '2秒',
+  });
+  for (const interval of [null, {}, { start: NaN, end: Infinity }]) {
+    assert.deepEqual(formatCoverageGap(interval), { rangeText: '--:--:-- → --:--:--', durationText: '时长待核实' });
+  }
+  assert.equal(formatCoverageGap({ start: '2026-01-15 19:02:12', end: '2026-01-15 19:02:10' }).durationText, '时长待核实');
 });

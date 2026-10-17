@@ -157,6 +157,9 @@ test('公网录像控制台贯通认证、摄像头回放、成片保护、上�
     assert.equal(uiModule.status, 200); assert.match(await uiModule.text(), /export function iconSvg/);
     assert.equal((await fetch(publicBase + '/output-player.js')).status, 200);
     assert.equal((await fetch(publicBase + '/output-download.js')).status, 200);
+    const replayControlsModule = await fetch(publicBase + '/replay-controls.js');
+    assert.equal(replayControlsModule.status, 200);
+    assert.match(await replayControlsModule.text(), /export function createReplayControls/);
     const coverageModule = await fetch(publicBase + '/playback-coverage.js');
     assert.equal(coverageModule.status, 200);
     assert.match(await coverageModule.text(), /export function findCoverageGap/);
@@ -184,7 +187,8 @@ test('公网录像控制台贯通认证、摄像头回放、成片保护、上�
     assert.match(consoleScript, /taskProgressPresentation\(task\)/);
     assert.match(consoleScript, /preserveRange: true/);
     assert.match(consoleScript, /console\/api\/dvrs/);
-    assert.match(consoleScript, /findCoverageGap\(state\.segments, inMs, outMs\)/);
+    assert.match(consoleScript, /listCoverageGaps\(state\.segments, state\.inMs, state\.outMs\)/);
+    assert.doesNotMatch(consoleScript, /selection-gap-warning/);
     assert.match(consoleScript, /function prefersStandardMp4\(\)/);
     assert.match(consoleScript, /function handlePlaybackError\(\)/);
     assert.match(consoleScript, /function showScrubTime\(ms, context = ''\)/);

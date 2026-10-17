@@ -338,7 +338,8 @@ test('a failed video cannot retain the pause icon even if paused remains false',
 test('transport HTML supplies Chinese accessible labels, icon visuals and 44px touch targets', () => {
   const html = statusDashboardPage();
   const expected = new Map([
-    ['go-live', '回到直播'], ['playback-toggle', '播放'], ['playback-mute', '开启声音'],
+    ['go-live', '回到直播'], ['transport-toggle', '播放回放'], ['playback-mute', '开启声音'],
+    ['replay-fullscreen', '全屏回放'], ['previous-day', '前一天'], ['next-day', '后一天'],
     ['skip-back', '后退 10 秒，长按连续后退'], ['skip-forward', '前进 10 秒，长按连续前进'],
   ]);
   for (const [id, label] of expected) {
@@ -348,12 +349,14 @@ test('transport HTML supplies Chinese accessible labels, icon visuals and 44px t
     assert.match(button, new RegExp(`title="${label}`));
     assert.match(button, /<svg[^>]+aria-hidden="true"/);
   }
+  assert.match(html, /id="playback-toggle"[^>]*tabindex="-1"[^>]*hidden inert/);
   assert.match(html, /id="playback-toggle-label" class="sr-only"/);
   assert.match(html, /id="player-time-label"[^>]*role="status"/);
-  const touchRule = css.match(/\.transport-buttons\s*>\s*button\s*\{([^}]+)\}/)?.[1];
+  const touchRule = css.match(/\.precision-layout #view-replay\.focus-replay \.transport-buttons > button \{([^}]+)\}/)?.[1];
   assert.ok(touchRule);
-  assert.match(touchRule, /min-width:\s*44px/); assert.match(touchRule, /min-height:\s*44px/);
-  assert.match(css, /#view-replay \.transport-buttons svg \{[^}]*width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1\.8/);
+  assert.match(touchRule, /min-width:var\(--control\)/); assert.match(touchRule, /min-height:var\(--control\)/);
+  assert.ok(Number(css.match(/--control:\s*(\d+)px/)?.[1]) >= 44);
+  assert.match(css, /#view-replay\.focus-replay \.transport-buttons > button svg \{[^}]*width:26px; height:26px;[^}]*fill:none; stroke:currentColor; stroke-width:1\.8/);
   assert.match(css, /\.sr-only\s*\{[^}]*clip-path:\s*inset\(50%\)/);
 });
 
@@ -373,10 +376,18 @@ test('central transport starts the selected recording when the player has no sou
   assert.equal(calls.length, 1); h.context.syncReplayToggle(); assert.equal(h.$('transport-toggle').disabled, true);
 });
 
-test('five icon transport uses explicit ordered columns and fullscreen exposes second steps', () => {
-  for (const [id, column] of [['previous-day',1],['skip-back',2],['transport-toggle',3],['skip-forward',4],['next-day',5]]) {
-    assert.ok(css.includes(`#${id}{grid-column:${column}}`));
+test('date navigation is grouped with the date and the player keeps one ordered transport row', () => {
+  const html = statusDashboardPage();
+  const transport = html.match(/<div class="transport-buttons">([\s\S]*?)<\/div>/)?.[1];
+  const dates = html.match(/<div class="replay-date-controls">([\s\S]*?)<\/div>/)?.[1];
+  assert.ok(transport); assert.ok(dates);
+  const buttonIds = markup => [...markup.matchAll(/<button\b[^>]*\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(buttonIds(transport), ['skip-back', 'transport-toggle', 'skip-forward']);
+  assert.deepEqual(buttonIds(dates), ['previous-day', 'playback-context', 'next-day']);
+  for (const id of [...buttonIds(transport), ...buttonIds(dates)]) {
+    assert.equal([...html.matchAll(new RegExp(`id="${id}"`, 'g'))].length, 1, id + ' must not be cloned for another viewport');
   }
+  assert.match(html, /class="legacy-timeline-metadata" hidden inert>[\s\S]*?id="fine-back"[\s\S]*?id="fine-forward"/);
   assert.match(script, /\$\('fine-back'\)\.addEventListener\('click', \(\) => stepReplay\(-1\)\)/);
   assert.match(script, /\$\('fine-forward'\)\.addEventListener\('click', \(\) => stepReplay\(1\)\)/);
 });
