@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createMediaMtxPlayback } from '../lib/mediamtx-playback.js';
+import { recordingCoverage } from '../lib/media-archive.js';
+import { listCoverageGaps } from '../public/playback-coverage.js';
 
 test('MediaMTX 日期查询只返回当前日有效录像段，不暴露上游 URL', async () => {
   const seen = [];
@@ -109,4 +111,44 @@ test('range preflight propagates caller cancellation and stops slow directory bo
     await assert.rejects(pending, { name: 'AbortError' });
     await assert.rejects(createMediaMtxPlayback({ baseUrl, timeoutMs: 100 }).listRange(...args), error => error.status === 504 && /超时/.test(error.message));
   } finally { for (const socket of sockets) socket.destroy(); await new Promise(resolve => server.close(resolve)); }
+});
+
+test('MediaMTX millisecond precision preserves an exact end after microsecond or nanosecond starts', async () => {
+  const rangeStart = Date.UTC(2026, 0, 1, 9, 1), rangeEnd = Date.UTC(2026, 0, 1, 10, 45);
+  const offset = 8 * 60 * 60 * 1000;
+  for (const fraction of ['000031982', '000311035', '123456', '123456789', '500000001', '999999999']) {
+    const playback = createMediaMtxPlayback({ fetchImpl: async () => Response.json([
+      { start: `2026-01-01T01:00:00.${fraction}Z`, duration: 6300 - Number(`0.${fraction}`) },
+    ]) });
+    const ranges = await playback.listRange('archive-a', '2026-01-01 09:01:00', '2026-01-01 10:45:00');
+    assert.deepEqual(ranges, [{ startMs: rangeStart, endMs: rangeEnd }], `fraction ${fraction} must not invent a trailing gap`);
+    assert.deepEqual(recordingCoverage(ranges, rangeStart, rangeEnd).coverage.missingIntervals, []);
+    const timeline = await playback.list('archive-a', '2026-01-01');
+    assert.deepEqual(listCoverageGaps(timeline, rangeStart - offset, rangeEnd - offset), [], 'day timeline and export preflight must agree');
+    assert.equal(Number.isInteger(Date.parse(timeline[0].start) + timeline[0].duration * 1000), true);
+  }
+});
+
+test('MediaMTX millisecond precision retains a real one-millisecond interruption', async () => {
+  const offset = 8 * 60 * 60 * 1000;
+  const rangeStart = Date.UTC(2026, 0, 1, 9, 0, 1), gapStart = Date.UTC(2026, 0, 1, 9, 0, 30), rangeEnd = Date.UTC(2026, 0, 1, 9, 1);
+  const playback = createMediaMtxPlayback({ fetchImpl: async () => Response.json([
+    { start: '2026-01-01T09:00:00.000311035+08:00', duration: 30 },
+    { start: '2026-01-01T09:00:30.001311035+08:00', duration: 29.998688965 },
+  ]) });
+  const ranges = await playback.listRange('archive-a', '2026-01-01 09:00:01', '2026-01-01 09:01:00');
+  const coverage = recordingCoverage(ranges, rangeStart, rangeEnd).coverage;
+  assert.deepEqual(coverage.missingIntervals.map(({ startMs, endMs }) => [startMs, endMs]), [[gapStart, gapStart + 1]]);
+  assert.equal(coverage.missingSeconds, 0.001);
+  const timeline = await playback.list('archive-a', '2026-01-01');
+  assert.deepEqual(listCoverageGaps(timeline, rangeStart - offset, rangeEnd - offset), [{ start: gapStart - offset, end: gapStart - offset + 1 }]);
+});
+
+test('MediaMTX millisecond precision clips a nanosecond cross-midnight segment consistently', async () => {
+  const playback = createMediaMtxPlayback({ fetchImpl: async () => Response.json([
+    { start: '2025-12-31T23:59:59.999999999+08:00', duration: 60.000000001 },
+  ]) });
+  assert.deepEqual(await playback.list('archive-a', '2026-01-01'), [{ start: '2025-12-31T16:00:00.000Z', duration: 60 }]);
+  assert.deepEqual(await playback.listRange('archive-a', '2026-01-01 00:00:00', '2026-01-01 00:01:00'),
+    [{ startMs: Date.UTC(2026, 0, 1), endMs: Date.UTC(2026, 0, 1, 0, 1) }]);
 });
