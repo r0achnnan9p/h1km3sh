@@ -77,6 +77,8 @@ test('landscape and fullscreen hide the whole chrome together and keep keyboard 
   const wake = rules.filter(rule => rule.selector.includes('focus-replay') && rule.selector.includes(':has(:focus-visible)'));
   assert.ok(wake.length >= 2);
   for (const rule of wake) { assert.equal(rule.style.opacity, '1'); assert.equal(rule.style['pointer-events'], 'auto'); }
+  assert.equal(style(prefix + ' .replay-control-panel > :is(.timeline-section,.replay-selection-editor)')['flex-shrink'], '0',
+    'bounded error-state docks scroll intact sections instead of shrinking their fixed grid rows into each other');
   const overlays = rules.filter(rule => rule.selector.endsWith(' .replay-control-panel') && rule.style.position === 'absolute');
   assert.ok(overlays.length >= 2);
   for (const { style: dock } of overlays) {
