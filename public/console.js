@@ -287,12 +287,19 @@ function setupReplayControls() {
   });
   applyMode(controller.mode); applyVisibility(controller.visible);
   const consume = event => { event.preventDefault(); event.stopImmediatePropagation(); };
-  view.addEventListener('pointerdown', event => { if (controller.pointerDown(event)) consume(event); }, true);
-  for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, event => { if (controller.pointerUp(event)) consume(event); }, true);
-  view.addEventListener('click', event => { if (controller.consumeClick(event)) consume(event); }, true);
-  view.addEventListener('pointermove', event => { if (event.pointerType === 'mouse') controller.show(); }, { passive: true });
-  view.addEventListener('focusin', () => controller.show());
-  view.addEventListener('focusout', () => controller.show());
+  const isPlaybackSurface = target => target instanceof HTMLElement && $('player-wrap').contains(target)
+    && !target.closest?.('button, a, input, textarea, select, [role="button"], [role="slider"], [contenteditable], dialog');
+  view.addEventListener('pointerdown', event => { if (controller.pointerDown(event, { surface: isPlaybackSurface(event.target) })) consume(event); }, true);
+  for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, event => { if (controller.pointerUp(event, { surface: isPlaybackSurface(event.target) })) consume(event); }, true);
+  view.addEventListener('click', event => { if (controller.consumeClick(event, { surface: isPlaybackSurface(event.target) })) consume(event); }, true);
+  view.addEventListener('pointermove', event => controller.pointerMove(event), { passive: true });
+  view.addEventListener('contextmenu', () => controller.reset());
+  document.addEventListener('focusin', event => {
+    const target = event.target;
+    if (document.body.dataset.view === 'replay' && (view.contains(target) || activeDialog?.open
+      || target instanceof HTMLElement && (target.isContentEditable || target.matches('input, textarea, select')))) controller.show();
+  });
+  view.addEventListener('focusout', () => { if (controller.visible) controller.show(); });
   // Wake before Tab navigation and keyboard shortcuts; hidden controls are inert.
   document.addEventListener('keydown', () => { if (document.body.dataset.view === 'replay') controller.show(); }, true);
   for (const mode of ['watch', 'select']) $(`replay-mode-${mode}`).addEventListener('click', () => controller.setMode(mode));
@@ -310,6 +317,9 @@ function syncReplayControls() {
   const view = $('view-replay');
   const fullscreen = document.fullscreenElement === view || view.classList.contains('replay-expanded');
   const landscape = window.matchMedia('(orientation: landscape) and (max-height: 540px) and (min-width: 568px) and (max-width: 1023px)').matches;
+  view.dataset.chromeOverlay = String(fullscreen || landscape);
+  const context = `${active}:${fullscreen}:${landscape}`;
+  if (syncReplayControls.context !== context) { syncReplayControls.context = context; replayControls.reset(); }
   replayControls.setEnabled(active && (fullscreen || landscape));
   if (!active) replayControls.reset();
 }
@@ -2736,7 +2746,7 @@ function openPlaybackTimeEditor() {
       sheet.close();
     } catch (error) { sheet.setPending(false); sheet.error.textContent = error.message; }
   });
-  input.focus();
+  input.focus({ preventScroll: true }); input.select(); input.setSelectionRange(0, input.value.length);
 }
 function openRangeEditor(focusBoundary = 'in') {
   const date = state.date, context = playbackContextKey();
@@ -2760,7 +2770,8 @@ function openRangeEditor(focusBoundary = 'in') {
     setTimelineWindow(state.inMs + Math.min(state.outMs - state.inMs, timelineWindow().span) / 2);
     updateSelection(); sheet.close();
   } catch (error) { sheet.error.textContent = error.message; } });
-  (focusBoundary === 'out' ? end : start).focus();
+  const input = focusBoundary === 'out' ? end : start;
+  input.focus({ preventScroll: true }); input.select(); input.setSelectionRange(0, input.value.length);
 }
 function recoverOutputRename(file) {
   if (!file.renamePending) return;

@@ -217,3 +217,77 @@ test('invalid idle timing cannot schedule an unbounded retry loop', () => {
     assert.throws(() => createReplayControls({ delay }), TypeError);
   }
 });
+
+
+function surfaceEvent(overrides = {}) {
+  return { pointerId: 3, pointerType: 'touch', button: 0, isPrimary: true, clientX: 200, clientY: 120, timeStamp: 100, detail: 1, ...overrides };
+}
+function tapSurface(controls, overrides = {}) {
+  const down = surfaceEvent(overrides);
+  const wake = controls.pointerDown(down, { surface: true });
+  const up = controls.pointerUp({ ...down, type: 'pointerup', timeStamp: down.timeStamp + 80 }, { surface: true });
+  const click = controls.consumeClick(down, { surface: true });
+  return { wake, up, click };
+}
+
+test('video taps hide immediately without enabling idle timers and the next tap only wakes', () => {
+  const h = harness();
+  assert.deepEqual(tapSurface(h.controls), { wake: false, up: false, click: true });
+  assert.equal(h.controls.visible, false); h.timers.advance(10000); assert.equal(h.timers.pending, 0);
+  assert.deepEqual(tapSurface(h.controls), { wake: true, up: true, click: true });
+  assert.equal(h.controls.visible, true); h.timers.advance(10000); assert.equal(h.timers.pending, 0);
+  tapSurface(h.controls); assert.equal(h.controls.visible, false);
+});
+
+test('manual hiding keeps the same current modal, drag, held-seek and focus guards', () => {
+  let blocked = false; const h = harness({ canHide: () => !blocked });
+  for (const reason of ['drag', 'held-seek', 'focus']) {
+    h.controls.hold(reason); assert.equal(tapSurface(h.controls).click, false); assert.equal(h.controls.visible, true); h.controls.release(reason);
+  }
+  blocked = true; assert.equal(tapSurface(h.controls).click, false); assert.equal(h.controls.visible, true);
+  blocked = false; tapSurface(h.controls); assert.equal(h.controls.visible, false);
+  h.controls.hold('modal'); assert.equal(h.controls.visible, true); assert.equal(h.timers.pending, 0);
+});
+
+test('a video drag, held press, cancellation, multiple pointers or outside release cannot hide controls', () => {
+  for (const reason of ['drag', 'long', 'cancel', 'secondary', 'outside', 'reset', 'missing-up']) {
+    const h = harness(), event = surfaceEvent(); h.controls.pointerDown(event, { surface: true });
+    if (reason === 'drag') { h.controls.pointerMove({ ...event, clientX: 230 }); h.controls.pointerMove(event); }
+    if (reason === 'secondary') h.controls.pointerDown({ ...event, pointerId: 4, isPrimary: false }, { surface: true });
+    if (reason === 'reset') h.controls.reset();
+    if (reason !== 'missing-up') h.controls.pointerUp({ ...event, type: reason === 'cancel' ? 'pointercancel' : 'pointerup', timeStamp: event.timeStamp + (reason === 'long' ? 451 : 80) }, { surface: reason !== 'outside' });
+    h.controls.consumeClick(event, { surface: true });
+    assert.equal(h.controls.visible, true, reason);
+  }
+});
+
+test('control gestures and secondary or synthetic clicks never become video toggles', () => {
+  for (const detail of [0, 2]) {
+    const h = harness(), event = surfaceEvent({ detail });
+    h.controls.pointerDown(event, { surface: true }); h.controls.pointerUp({ ...event, type: 'pointerup', timeStamp: 180 }, { surface: true });
+    assert.equal(h.controls.consumeClick(event, { surface: true }), false); assert.equal(h.controls.visible, true);
+  }
+  const h = harness(), event = surfaceEvent();
+  h.controls.pointerDown(event); h.controls.pointerUp({ ...event, type: 'pointerup', timeStamp: 180 }, { surface: true });
+  assert.equal(h.controls.consumeClick(event, { surface: true }), false); assert.equal(h.controls.visible, true);
+  tapSurface(h.controls); tapSurface(h.controls, { detail: 2 }); assert.equal(h.controls.visible, true, 'a rapid second tap wakes without hiding again');
+});
+
+test('portrait wake gesture still prevents an accidental action if the click target moves with layout', () => {
+  const h = harness(); tapSurface(h.controls);
+  assert.equal(h.controls.pointerDown(surfaceEvent(), { surface: true }), true);
+  assert.equal(h.controls.pointerUp(surfaceEvent({ timeStamp: 180 })), true);
+  assert.equal(h.controls.consumeClick({ detail: 1 }), true, 'Safari MouseEvent fallback is suppressed even outside the video');
+  assert.equal(h.controls.visible, true);
+});
+
+test('mouse movement preserves manual hiding in normal and fullscreen layouts, while the next tap wakes', () => {
+  for (const enabled of [false, true]) {
+    const h = harness(); h.controls.setEnabled(enabled); tapSurface(h.controls);
+    h.controls.pointerMove(surfaceEvent({ pointerType: 'mouse', clientX: 300 })); assert.equal(h.controls.visible, false);
+    assert.deepEqual(tapSurface(h.controls, { pointerType: 'mouse' }), { wake: true, up: true, click: true });
+    assert.equal(h.controls.visible, true);
+  }
+  const h = harness(); h.controls.setEnabled(true); h.timers.advance(2500); assert.equal(h.controls.visible, false);
+  h.controls.pointerMove(surfaceEvent({ pointerType: 'mouse', clientX: 320 })); assert.equal(h.controls.visible, true, 'mouse movement still wakes timed-out controls');
+});

@@ -42,7 +42,7 @@ class Target {
  listeners=new Map();
  addEventListener(type,listener,options){const entries=this.listeners.get(type)||[];entries.push({listener,capture:options===true||options?.capture===true});this.listeners.set(type,entries);}
  emit(type,properties={}){
-  const event={type,target:this,button:0,isPrimary:true,pointerId:1,detail:1,defaultPrevented:false,stopped:false,
+  const event={type,target:this,button:0,isPrimary:true,pointerId:1,pointerType:'touch',clientX:200,clientY:120,timeStamp:100,detail:1,defaultPrevented:false,stopped:false,
    preventDefault(){this.defaultPrevented=true;},stopImmediatePropagation(){this.stopped=true;},...properties};
   const entries=[...(this.listeners.get(type)||[])].sort((a,b)=>Number(b.capture)-Number(a.capture));
   for(const {listener} of entries){listener(event);if(event.stopped)break;}
@@ -56,15 +56,16 @@ class Element extends Target {
  getAttribute(name){return this.attrs.get(name)??null;}
  removeAttribute(name){this.attrs.delete(name);}
  contains(node){for(let current=node;current;current=current.parentNode)if(current===this)return true;return false;}
- matches(selector){return selector===':focus-visible'?Boolean(this.focusVisible):selector.split(',').map(value=>value.trim()).includes(this.tagName);}
+ matches(selector){return selector===':focus-visible'?Boolean(this.focusVisible):selector.split(',').map(value=>value.trim()).some(value=>value===this.tagName||value==='[contenteditable]'&&this.isContentEditable||value===`[role="${this.getAttribute('role')}"]`);}
+ closest(selector){for(let node=this;node;node=node.parentNode)if(node.matches(selector))return node;return null;}
 }
 function replayPresentation({width=932,height=430}={}){
  const ids=['view-replay','replay-control-panel','replay-selection-editor','replay-mode-watch','replay-mode-select',
-  'date-select','playback-source','camera-select','dvr-select','dvr-channel','mark-in','mark-out','export-range','replay-player'];
+  'date-select','playback-source','camera-select','dvr-select','dvr-channel','mark-in','mark-out','export-range','replay-player','player-wrap','timeline-overview'];
  const nodes=new Map(ids.map(id=>[id,new Element(id.startsWith('replay-mode-')||['mark-in','mark-out','export-range'].includes(id)?'button':'div')]));
  const get=id=>{assert.ok(nodes.has(id),id);return nodes.get(id);};
  const view=get('view-replay'),panel=get('replay-control-panel'),editor=get('replay-selection-editor'),topbar=new Element();
- topbar.parentNode=view;panel.parentNode=view;editor.parentNode=panel;
+ topbar.parentNode=view;panel.parentNode=view;editor.parentNode=panel;get('player-wrap').parentNode=view;get('replay-player').parentNode=get('player-wrap');get('timeline-overview').parentNode=panel;
  for(const id of ['replay-mode-watch','replay-mode-select'])get(id).parentNode=panel;
  for(const id of ['mark-in','mark-out','export-range'])get(id).parentNode=editor;
  view.querySelector=selector=>{assert.equal(selector,'.replay-topbar');return topbar;};
@@ -86,8 +87,8 @@ function replayPresentation({width=932,height=430}={}){
  vm.runInContext(source.slice(begin,end)+'\nglobalThis.controls = replayControls;',context);
  context.syncReplayControls();
  const snapshot=()=>JSON.stringify({inMs:state.inMs,outMs:state.outMs,cursorMs:state.cursorMs,position:video.currentTime,paused:video.paused});
- const click=id=>{const target=get(id),event=view.emit('click',{target});if(!event.stopped)target.emit('click');return event;};
- const tap=id=>{const target=get(id),down=view.emit('pointerdown',{target}),up=window.emit('pointerup',{target}),event=click(id);return{down,up,event};};
+ const click=(id,properties={})=>{const target=get(id),event=view.emit('click',{target,...properties});if(!event.stopped)target.emit('click',properties);return event;};
+ const tap=(id,properties={})=>{const target=get(id),down=view.emit('pointerdown',{target,...properties}),up=window.emit('pointerup',{target,timeStamp:180,...properties}),event=click(id,properties);return{down,up,event};};
  return{get,view,panel,editor,topbar,window,document,state,context,timers,advance,snapshot,click,tap};
 }
 
@@ -160,4 +161,55 @@ test('桌面悬停时间只显示鼠标位置，不改变播放选择，触屏�
  c.updateTimelineHover({pointerType:'touch',buttons:0,clientX:300});assert.equal(marker.hidden,true);
  state.dragging=true;c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:300});assert.equal(marker.hidden,true);
  state.dragging=false;window.innerWidth=390;c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:300});assert.equal(marker.hidden,true);
+});
+
+
+test('画面短点按在竖屏、桌面和横屏立即收起控制面，第二次只唤醒不改变播放或入出点',()=>{
+ for(const [width,height,overlay] of [[430,932,false],[932,430,true],[1440,900,false]]){
+  const h=replayPresentation({width,height}),before=h.snapshot();
+  assert.equal(h.view.dataset.chromeOverlay,String(overlay));
+  const first=h.tap('replay-player');assert.equal(first.event.defaultPrevented,true);
+  assert.equal(h.view.dataset.chromeIdle,'true');assert.equal(h.panel.inert,true);assert.equal(h.topbar.getAttribute('aria-hidden'),'true');
+  const wake=h.tap('replay-player');assert.ok(wake.down.defaultPrevented&&wake.up.defaultPrevented&&wake.event.defaultPrevented);
+  assert.equal(h.view.dataset.chromeIdle,'false');assert.equal(h.panel.inert,false);assert.equal(h.topbar.getAttribute('aria-hidden'),null);
+  assert.equal(h.snapshot(),before);
+ }
+
+});
+
+test('控制按钮、时间轴和画面内交互元素不会触发隐藏；画面拖动与长按同样排除',()=>{
+ const h=replayPresentation({width:430,height:932});let marks=0;h.get('mark-in').addEventListener('click',()=>marks++);
+ for(const id of ['mark-in','timeline-overview']){h.tap(id);assert.equal(h.panel.inert,false,id);}
+ assert.equal(marks,1);
+ h.get('mark-in').parentNode=h.get('player-wrap');h.tap('mark-in');assert.equal(marks,2);assert.equal(h.panel.inert,false,'a real control over the video keeps its action');
+ const target=h.get('replay-player');
+ for(const reason of ['drag','held','cancel']){
+  h.view.emit('pointerdown',{target});
+  if(reason==='drag'){h.view.emit('pointermove',{target,clientX:240});h.view.emit('pointermove',{target,clientX:200});}
+  h.window.emit(reason==='cancel'?'pointercancel':'pointerup',{target,timeStamp:reason==='held'?800:180});
+  h.click('replay-player');assert.equal(h.panel.inert,false,reason);
+ }
+});
+
+test('手动隐藏后切页、退出仍为横屏的全屏及打开弹层都恢复控制面',()=>{
+ const h=replayPresentation({width:430,height:932});h.tap('replay-player');assert.equal(h.panel.inert,true);
+ h.document.body.dataset.view='tasks';h.context.syncReplayControls();assert.equal(h.panel.inert,false);
+ h.document.body.dataset.view='replay';h.context.syncReplayControls();h.tap('replay-player');assert.equal(h.panel.inert,true);
+ h.context.activeDialog={open:true};h.document.emit('focusin',{target:new Element('input')});assert.equal(h.panel.inert,false);
+ h.advance(5000);assert.equal(h.panel.inert,false);h.context.activeDialog=null;
+ const landscape=replayPresentation();landscape.document.fullscreenElement=landscape.view;landscape.context.syncReplayControls();landscape.tap('replay-player');assert.equal(landscape.panel.inert,true);
+ landscape.document.fullscreenElement=null;landscape.context.syncReplayControls();assert.equal(landscape.panel.inert,false,'exiting native fullscreen restores controls even while landscape auto-hide remains enabled');
+ landscape.advance(2499);assert.equal(landscape.panel.inert,false);
+});
+
+
+test('隐藏造成的失焦与全屏鼠标移动不抢先唤醒，下次画面点击正确展开',()=>{
+ const h=replayPresentation({width:1440,height:900});h.document.fullscreenElement=h.view;h.context.syncReplayControls();
+ h.tap('replay-player');assert.equal(h.panel.inert,true);
+ h.view.emit('focusout',{target:h.get('mark-in')});assert.equal(h.panel.inert,true);
+ h.document.emit('focusin',{target:new Element('body')});assert.equal(h.panel.inert,true);
+ h.view.emit('pointermove',{target:h.get('replay-player'),pointerType:'mouse',clientX:260});assert.equal(h.panel.inert,true);
+ const wake=h.tap('replay-player',{pointerType:'mouse'});assert.equal(wake.event.defaultPrevented,true);assert.equal(h.panel.inert,false);
+ h.advance(2500);assert.equal(h.panel.inert,true);
+ h.view.emit('pointermove',{target:h.get('replay-player'),pointerType:'mouse',clientX:270});assert.equal(h.panel.inert,false);
 });

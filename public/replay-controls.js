@@ -1,7 +1,7 @@
 /**
  * Local presentation state for the replay panel. The caller owns media, marks,
  * DOM focus and event routing; neither mode changes nor idle hiding seek video.
- * Enable only while the replay panel should auto-hide (landscape/fullscreen).
+ * Enable only auto-hiding in landscape/fullscreen; manual taps work in any layout.
  *
  * Capture pointerdown/up and click before their ordinary actions. When a pointer
  * method returns true, preventDefault + stopImmediatePropagation: the first tap
@@ -16,8 +16,8 @@ export function createReplayControls({
   clearTimer = globalThis.clearTimeout,
 } = {}) {
   if (!Number.isFinite(delay) || delay <= 0) throw new TypeError('Replay idle delay must be finite and positive.');
-  let enabled = false, visible = true, mode = 'select', destroyed = false;
-  let timer = null, timerGeneration = 0, suppressedPointer = null;
+  let enabled = false, visible = true, manuallyHidden = false, mode = 'select', destroyed = false;
+  let timer = null, timerGeneration = 0, suppressedPointer = null, surfaceTap = null;
   const holds = new Set(), pointers = new Set();
 
   function cancelTimer() {
@@ -47,9 +47,16 @@ export function createReplayControls({
   }
   function show() {
     if (destroyed) return false;
+    manuallyHidden = false;
     const changed = setVisible(true);
     schedule();
     return changed;
+  }
+  function hide() {
+    if (destroyed || !visible || holds.size || pointers.size || !canHide()) return false;
+    cancelTimer();
+    manuallyHidden = true;
+    return setVisible(false);
   }
   function setEnabled(next) {
     if (destroyed || enabled === Boolean(next)) return false;
@@ -78,33 +85,62 @@ export function createReplayControls({
     show();
     return true;
   }
-  function pointerDown({ pointerId = 0, button = 0, isPrimary = true } = {}) {
-    if (destroyed || button !== 0 || !isPrimary) return false;
+  function samePointer(event, pointerId) {
+    // Safari can deliver a MouseEvent without pointerId after the pointer events.
+    return !event.pointerId || event.pointerId <= 0 || pointerId <= 0 || event.pointerId === pointerId;
+  }
+  function pointerDown(event = {}, { surface = false } = {}) {
+    const { pointerId = 0, button = 0, isPrimary = true } = event;
+    if (destroyed) return false;
+    if (button !== 0 || !isPrimary) { surfaceTap = null; return false; }
     if (pointers.has(pointerId)) return suppressedPointer === pointerId;
-    // Some browsers omit the click after preventDefault/cancellation. A fresh
-    // pointer gesture must never inherit that previous tap's suppression.
+    // A fresh gesture must never inherit a previous cancelled/omitted click.
     if (!pointers.size) suppressedPointer = null;
-    if (!enabled) return false;
     const wakeOnly = !visible;
     pointers.add(pointerId);
+    surfaceTap = !wakeOnly && surface && pointers.size === 1 && canHide()
+      && [event.clientX, event.clientY, event.timeStamp].every(Number.isFinite)
+      ? { pointerId, x: event.clientX, y: event.clientY, at: event.timeStamp, released: false } : null;
     if (wakeOnly) suppressedPointer = pointerId;
     show();
     return wakeOnly;
   }
-  function pointerUp({ pointerId = 0, type } = {}) {
+  function pointerMove(event = {}) {
+    if (destroyed) return;
+    if (surfaceTap?.pointerId === event.pointerId
+      && Math.hypot(event.clientX - surfaceTap.x, event.clientY - surfaceTap.y) > 8) surfaceTap = null;
+    // Mouse movement may reveal timed-out controls, but cannot pre-empt the
+    // next explicit wake tap after a user manually hides them.
+    if (event.pointerType === 'mouse' && (visible || enabled && !manuallyHidden)) show();
+  }
+  function pointerUp(event = {}, { surface = false } = {}) {
+    const { pointerId = 0, type } = event;
     if (destroyed) return false;
+    if (surfaceTap?.pointerId === pointerId) {
+      const elapsed = event.timeStamp - surfaceTap.at;
+      const moved = Math.hypot(event.clientX - surfaceTap.x, event.clientY - surfaceTap.y);
+      if (type === 'pointercancel' || !surface || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > 450 || !Number.isFinite(moved) || moved > 8) surfaceTap = null;
+      else surfaceTap.released = true;
+    }
     if (type === 'pointercancel' && pointers.has(pointerId)) suppressedPointer = pointerId;
     const consumed = suppressedPointer === pointerId;
     if (pointers.delete(pointerId)) show();
     return consumed;
   }
-  function consumeClick({ detail = 1, pointerId } = {}) {
-    if (destroyed || detail === 0 || suppressedPointer === null) return false;
-    // Safari can deliver a MouseEvent without pointerId; modern pointer clicks
-    // carry it, so an unrelated pointer cannot consume the pending wake click.
-    if (pointerId !== undefined && pointerId > 0 && suppressedPointer > 0 && pointerId !== suppressedPointer) return false;
-    suppressedPointer = null;
-    return true;
+  function consumeClick(event = {}, { surface = false } = {}) {
+    const { detail = 1 } = event;
+    if (destroyed || detail === 0) return false;
+    if (suppressedPointer !== null && samePointer(event, suppressedPointer)) {
+      suppressedPointer = null;
+      surfaceTap = null;
+      return true;
+    }
+    const tap = surfaceTap;
+    surfaceTap = null;
+    // Only a completed short tap that began on the video can hide controls.
+    // Dragging, held presses, secondary clicks and double-clicks never toggle.
+    if (!surface || detail !== 1 || !tap?.released || !samePointer(event, tap.pointerId)) return false;
+    return hide();
   }
   function reset() {
     if (destroyed) return;
@@ -113,6 +149,7 @@ export function createReplayControls({
     if (pointers.size) suppressedPointer = pointers.values().next().value;
     pointers.clear();
     holds.clear();
+    surfaceTap = null;
     show();
   }
   function destroy() {
@@ -122,13 +159,14 @@ export function createReplayControls({
     pointers.clear();
     holds.clear();
     suppressedPointer = null;
+    surfaceTap = null;
     setVisible(true);
   }
 
   return {
     get visible() { return visible; },
     get mode() { return mode; },
-    setEnabled, show, setMode, hold, release,
-    pointerDown, pointerUp, consumeClick, reset, destroy,
+    setEnabled, show, hide, setMode, hold, release,
+    pointerDown, pointerMove, pointerUp, consumeClick, reset, destroy,
   };
 }

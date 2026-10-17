@@ -1193,6 +1193,8 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay .player-wrap video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
 .precision-layout #view-replay.focus-replay .legacy-playback-toggle { display:none !important; }
 .precision-layout #view-replay.focus-replay .replay-control-panel { display:flex; flex:none; flex-direction:column; min-width:0; gap:var(--space-2); margin:0; padding:0; }
+/* A manual video tap gives the freed space back to the player in normal layouts. */
+.precision-layout #view-replay.focus-replay[data-chrome-overlay='false'][data-chrome-idle='true'] :is(.replay-topbar,.replay-control-panel) { display:none; }
 .precision-layout #view-replay.focus-replay .timeline-section { position:static; inset:auto; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; grid-area:auto; width:100%; height:auto; min-height:0; margin:0; padding:0; gap:var(--space-1) var(--space-2); border:0; border-radius:0; background:transparent; box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; overflow:visible; }
 .precision-layout #view-replay.focus-replay .replay-toolbar { display:flex; grid-column:1; grid-row:1; align-items:center; justify-content:flex-start; gap:var(--space-2); min-width:0; padding:0; margin:0; border:0; background:transparent; }
 .precision-layout #view-replay.focus-replay .transport-buttons { display:grid; grid-template-columns:repeat(3,var(--control)); grid-auto-flow:column; flex:none; width:auto; max-width:none; margin:0; gap:var(--space-1); }
