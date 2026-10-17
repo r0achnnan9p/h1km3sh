@@ -36,9 +36,11 @@ function harness() {
   const document = new Element(); document.body = { dataset: { view: 'library' } }; document.createElement = tag => tag === 'video' ? new Video() : new Element(tag);
   const state = { outputs: Array.from({ length: 4 }, (_, index) => ({ id: `file-${index}`, filename: `Match ${index}.mp4`, streamUrl: `/stream/${index}`, size: 1000 + index, modifiedAt: new Date(Date.now() - index * 60000).toISOString() })) };
   const outputPlayers = createOutputPlayers({ document }), outputCards = new Map();
-  const context = vm.createContext({ interruptTimelineScrub() {}, createCollectionFeed, settingsInline: null, outputFeed: null, outputFilter: null, outputDetail: null, outputRequest: 0, stateRequest: 0, consoleSession: 0, createOutputDownload, appPath: value => value, notify() {}, iconSvg, setButtonIcon, createSettingsRow, document, $, state, outputPlayers, outputCards, window: { consoleIntegrations: {} }, uploadAccounts: { stop() {} }, configEditor: null, suspendedConfigEditor: null, activeDialog: null, clockTimer: null, clearTimeout, setAuthMode() {}, setConnection() {} });
+  const context = vm.createContext({ exportSubmission: null, pendingTaskFocus: null, replayHoldButtons: [], interruptTimelineScrub() {}, createCollectionFeed, settingsInline: null, outputFeed: null, outputFilter: null, outputDetail: null, outputRequest: 0, stateRequest: 0, consoleSession: 0, createOutputDownload, appPath: value => value, notify() {}, iconSvg, setButtonIcon, createSettingsRow, document, $, state, outputPlayers, outputCards, window: { consoleIntegrations: {} }, uploadAccounts: { stop() {} }, configEditor: null, suspendedConfigEditor: null, activeDialog: null, clockTimer: null, clearTimeout, setAuthMode() {}, setConnection() {} });
   vm.runInContext(script.slice(script.indexOf('function prettyBytes('), script.indexOf('function navigateToUploadSettings(')), context);
   vm.runInContext(script.slice(script.indexOf('function loggedOut('), script.indexOf('async function start(')), context);
+  vm.runInContext(script.slice(script.indexOf('function cancelExportSubmission('), script.indexOf('async function submitExportSelection(')), context);
+  vm.runInContext(script.slice(script.indexOf('function cancelReplayHold('), script.indexOf('function tryBufferedReplaySeek(')), context);
   return { context, $, state, outputPlayers, outputCards };
 }
 test('repeated renders keep exactly one card per output and leave playing video attached', async () => {
@@ -179,4 +181,44 @@ test('旧详情迟到close不会移走或暂停新详情播放器', async () => 
   const pauses = video.pauses;
   await sheets[0].dialog.emit('close');
   assert.equal(player.parent, sheets[1].content); assert.equal(video.pauses, pauses); assert.equal(video.paused, false);
+});
+
+
+test('成片上传状态使用明确服务标识，完成无多余勾号并保留失败与进行中反馈', () => {
+  const h = harness(), compact = new Element(), details = new Element();
+  const file = { uploads: { cloud189: { status: 'completed' }, bilibili: { status: 'completed' } } };
+  h.context.renderOutputUploadStates(compact, file, true);
+  h.context.renderOutputUploadStates(details, file);
+  for (const [index, label, icon] of [[0, '189', iconSvg('cloud189', 'provider-wordmark')], [1, 'B站', iconSvg('tv')]]) {
+    const row = compact.children[index];
+    assert.equal(row.dataset.status, 'completed');
+    assert.equal(row.innerHTML, icon, '已上传只显示绿色服务图标，不再追加勾号');
+    assert.equal(row.getAttribute('aria-label'), `${label}：已上传`);
+    assert.equal(row.title, `${label}：已上传`);
+    assert.equal(details.children[index].children[0].textContent, `${label}：已上传`);
+  }
+  for (const status of ['none', 'queued', 'uploading', 'failed', 'unknown']) {
+    file.uploads = { cloud189: { status, progress: 42 }, bilibili: { status: 'none' } };
+    h.context.renderOutputUploadStates(compact, file, true);
+    const row = compact.children[0];
+    assert.equal(row.dataset.status, status);
+    assert.equal(row.innerHTML, iconSvg('cloud189', 'provider-wordmark') + (['failed', 'unknown'].includes(status) ? iconSvg('warning') : ''));
+    assert.doesNotMatch(row.title, /已上传/);
+    if (status === 'uploading') {
+      assert.equal(row.children[0].tag, 'progress');
+      assert.equal(row.children[0].value, 42);
+      assert.equal(row.children[0].getAttribute('aria-label'), '189上传进度');
+    }
+  }
+});
+
+
+test('session reset aborts pending submission, cancels held replay controls and discards the prior task reveal', () => {
+  const h = harness(), controller = new AbortController(), reasons = [];
+  const pending = { controller, silent: false };
+  h.context.exportSubmission = pending; h.context.pendingTaskFocus = { kind: 'uploads', id: 'old-upload' };
+  h.context.replayHoldButtons.push({ cancel: reason => reasons.push(reason) });
+  h.context.loggedOut();
+  assert.equal(controller.signal.aborted, true); assert.equal(pending.silent, true);
+  assert.deepEqual(reasons, ['playback-changed']); assert.equal(h.context.pendingTaskFocus, null);
 });

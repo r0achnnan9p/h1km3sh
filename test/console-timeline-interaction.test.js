@@ -133,7 +133,7 @@ test('short ranges have separate top and bottom hit areas and explicit mark acti
   const css = fs.readFileSync(new URL('../public/console.css', import.meta.url), 'utf8');
   const { statusDashboardPage } = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
   assert.match(css, /\.boundary-handle \{ top: -10px; height: 64px/); assert.match(css, /\.boundary-handle.end \{ top: 54px/);
-  for (const text of ['设置入点', '设置出点', '清除标记']) assert.ok(html.includes(text));
+  for (const text of ['设置入点', '设置出点', '清除入点和出点']) assert.ok(html.includes(text));
   assert.match(html, /id="clear-marks"/);
   assert.match(css, /#view-replay \.time-cursor \{ left:50% !important/);
 });

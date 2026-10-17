@@ -23,7 +23,9 @@ class Node {
 }
 function harness(state = { tasks: [], uploads: [] }) {
   const nodes = new Map(), $ = id => { if (!nodes.has(id)) nodes.set(id, new Node()); return nodes.get(id); };
-  const context = vm.createContext({ state, $, document: { createElement: tag => new Node(tag), querySelectorAll: () => [] }, makeTaskCard(task, uploadTask) { const card = new Node('article'); card.task = task; card.uploadTask = uploadTask; return card; } });
+  const context = vm.createContext({ state, pendingTaskFocus: null, $, document: { createElement: tag => new Node(tag), querySelectorAll: () => [] }, makeTaskCard(task, uploadTask) { const card = new Node('article'); card.task = task; card.uploadTask = uploadTask; return card; } });
+  // These feed snapshots do not follow a local submission.
+  vm.runInContext(script.slice(script.indexOf('function revealSubmittedTask('), script.indexOf('function openTaskPage(')), context);
   vm.runInContext(script.slice(script.indexOf('const statusLabels ='), script.indexOf('function makeTaskCard(')), context);
   const document = {createElement: tag => new Node(tag)};
   context.taskFeeds = { exports: createTaskFeed({list:$('task-list'),scroller:new Node(),sentinel:new Node(),makeCard:t=>context.makeTaskCard(t,false),createdAt:context.taskCreatedAt,document}), uploads:createTaskFeed({list:$('upload-list'),scroller:new Node(),sentinel:new Node(),makeCard:t=>context.makeTaskCard(t,true),createdAt:context.taskCreatedAt,document}) };

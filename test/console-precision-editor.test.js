@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const source = fs.readFileSync(new URL('../public/console.js', import.meta.url), 'utf8');
 function editor() {
-  const state = { date: '2026-10-08', playbackSelectionVersion: 3, cursorMs: 12000, inMs: 10000, outMs: 30000 };
+  const state = { date: '2026-10-08', playbackSource: 'mediamtx', selectedCamera: 'camera-a', configRevision: 'revision-1', playbackSelectionVersion: 3, cursorMs: 12000, inMs: 10000, outMs: 30000 };
   const actions = new Map(), input = { value: '12000', setAttribute() {}, focus() {} };
   const sheet = { content: {}, actions: {}, error: {}, close() { this.closed = true; }, setPending(value) { this.pending = value; } };
   const jumps = [];
@@ -15,6 +15,7 @@ function editor() {
     addButton(_parent, label, _className, action) { actions.set(label, action); }, openRangeEditor() { sheet.rangeOpened = true; },
     async jumpToTimelineTime(ms, source, options) { jumps.push({ ms, source, options }); state.cursorMs = ms; },
   });
+  vm.runInContext(source.slice(source.indexOf('function playbackContextKey('), source.indexOf('function openBoundaryEditor(')), context);
   vm.runInContext(source.slice(source.indexOf('function openPlaybackTimeEditor()'), source.indexOf('function openRangeEditor()')), context);
   context.openPlaybackTimeEditor();
   return { state, input, sheet, jumps, actions };
@@ -53,17 +54,18 @@ test('提交提示到期隐藏操作；键盘焦点停留时保留提示，点�
     contains(node) { return this.children.includes(node); }
   }
   const toast = new Node(), document = { activeElement: null, createElement: () => new Node() };
-  const timers = [], routes = [];
+  const timers = [], routes = [], selectedTabs = [];
   const context = vm.createContext({ document, $: () => toast, toastTimer: null, iconSvg: () => '',
-    setButtonIcon(button, _icon, label) { button.label = label; }, navigate: view => routes.push(view),
+    setButtonIcon(button, _icon, label) { button.label = label; }, navigate: view => routes.push(view), selectTaskTab: upload => selectedTabs.push(upload),
     clearTimeout() {}, setTimeout(fn) { timers.push(fn); return timers.length; },
   });
+  vm.runInContext(source.slice(source.indexOf('function openTaskPage('), source.indexOf('function selectTaskTab(')), context);
   vm.runInContext(source.slice(source.indexOf('function notify('), source.indexOf('async function api(')), context);
-  context.notify('已提交', false, { range: '08:00:00 → 08:00:10' });
+  context.notify('已提交', false, { kind: 'exports', range: '08:00:00 → 08:00:10' });
   const arrow = toast.children.find(node => node.label === '查看任务');
   document.activeElement = arrow; timers.shift()(); assert.equal(toast.hidden, false);
   document.activeElement = null; timers.shift()(); assert.equal(toast.hidden, true);
-  context.notify('已提交', false, { range: '08:00:00 → 08:00:10' });
+  context.notify('已提交', false, { kind: 'exports', range: '08:00:00 → 08:00:10' });
   toast.children.find(node => node.label === '查看任务').listeners.click();
-  assert.deepEqual(routes, ['tasks']); assert.equal(toast.hidden, true);
+  assert.deepEqual(routes, ['tasks']); assert.deepEqual(selectedTabs, [false]); assert.equal(toast.hidden, true);
 });

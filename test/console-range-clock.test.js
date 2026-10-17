@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import fs from 'node:fs';
+import { bindPressRepeat } from '../public/press-repeat.js';
 const script = fs.readFileSync(new URL('../public/console.js', import.meta.url), 'utf8');
 function harness() {
   const state = { date: '2026-09-30', cursorMs: 5226000, inMs: null, outMs: null, playBounds: { start: 5226000, duration: 600 }, playRequestId: 0, playbackSource: 'mediamtx', selectedCamera: 'D2', segments: [{ start: '1970-01-01T00:00:00Z', duration: 86400 }], timelineSpanSeconds: 3600, timelineStartMs: 4800000, dragging: false, followPlayback: false };
   const elements = new Map(), notices = [];
   const $ = id => { if (!elements.has(id)) elements.set(id, { hidden: false, paused: true, readyState: 0, error: null, seeking: false, currentTime: 0, duration: NaN, src: 'http://test/old', currentSrc: 'http://test/old', listeners: {}, dataset: {}, classList: { add() {}, remove() {}, toggle() {} }, setAttribute() {}, removeAttribute() {}, addEventListener(name, fn) { this.listeners[name] = fn; }, pause() { this.paused = true; }, play() { return Promise.reject(new Error('Playback unavailable')); }, load() {}, getBoundingClientRect: () => ({ left: 0, width: 300 }) }); return elements.get(id); };
-  const context = vm.createContext({ state, $, Math, Number, Date, URL, URLSearchParams, navigator: { userAgent: 'iPhone Safari/' }, appPath: x => x, dateStart: () => 0, wallTime: ms => '1970-01-01 ' + new Date(ms).toISOString().slice(11, 19), updateCursor() {}, updateSelection() {}, renderTimeline() {}, syncReplayToggle() {}, setPlaybackNotice() {}, notify: (...args) => notices.push(args), handlePlaybackError() {} });
+  const context = vm.createContext({ state, $, bindPressRepeat, replayHoldButtons: [], Math, Number, Date, URL, URLSearchParams, navigator: { userAgent: 'iPhone Safari/' }, appPath: x => x, dateStart: () => 0, wallTime: ms => '1970-01-01 ' + new Date(ms).toISOString().slice(11, 19), updateCursor() {}, updateSelection() {}, renderTimeline() {}, syncReplayToggle() {}, setPlaybackNotice() {}, notify: (...args) => notices.push(args), handlePlaybackError() {} });
   for (const [start, end] of [
     ['function stopHlsPreview(', 'function syncReplayToggle('],
     ['function segmentBounds(', 'function renderOverview('],

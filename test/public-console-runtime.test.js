@@ -118,7 +118,8 @@ test('公网录像控制台贯通认证、摄像头回放、成片保护、上�
     assert.match(csp, /script-src 'self';/);
     assert.doesNotMatch(csp, /script-src[^;]*data:/);
     const dashboard = await rootResponse.text();
-    assert.match(dashboard, /H1kM3sh · 录像控制台/);
+    assert.match(dashboard, /<title>H1kM3sh<\/title>/);
+    assert.doesNotMatch(dashboard, /<title>[^<]*录像控制台/);
     assert.match(dashboard, /apple-mobile-web-app-capable/);
     assert.match(dashboard, /console-icon-v2\.svg/);
     assert.match(dashboard, /site-v2\.webmanifest/);
@@ -172,7 +173,7 @@ test('公网录像控制台贯通认证、摄像头回放、成片保护、上�
     assert.equal(versionedManifest.status, 200);
     const manifestData = await versionedManifest.json();
     assert.equal(manifestData.display, 'standalone');
-    assert.equal(manifestData.name, 'H1kM3sh 录像控制台');
+    assert.equal(manifestData.name, 'H1kM3sh');
     assert.equal(manifestData.short_name, 'H1kM3sh');
     assert.equal(manifestData.start_url, './');
     assert.equal(manifestData.scope, './');

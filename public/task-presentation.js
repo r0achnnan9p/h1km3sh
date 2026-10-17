@@ -196,12 +196,29 @@ export function createCollectionFeed({ list, scroller, sentinel, makeCard, creat
       savedScroll = scroller.scrollTop; savedAnchor = captureAnchor();
     }
   }
+  // Explicit navigation after a submission; ordinary updates keep their scroll anchor.
+  function reveal(id) {
+    if (id == null || !visiblePanel() || !scroller.getBoundingClientRect) return false;
+    const bounds = scroller.getBoundingClientRect();
+    if (!(bounds.bottom > bounds.top)) return false;
+    const index = tasks.findIndex(task => key(task) === String(id));
+    if (index < 0) return false;
+    if (index >= limit) { limit = Math.ceil((index + 1) / pageSize) * pageSize; render(); }
+    if (tasks[index].archivedAt && nodes.get('archive')) nodes.get('archive').open = true;
+    const card = nodes.get('task:' + key(tasks[index]));
+    if (!hasLayout(card)) return false;
+    const top = scroller.scrollTop + card.getBoundingClientRect().top - bounds.top;
+    const maximum = scroller.scrollHeight - scroller.clientHeight;
+    scroller.scrollTop = Math.max(0, Number.isFinite(maximum) ? Math.min(top, Math.max(0, maximum)) : top);
+    savedScroll = scroller.scrollTop; savedAnchor = captureAnchor();
+    return true;
+  }
   function loadMore() { if (!visiblePanel() || limit >= tasks.length) return; limit += pageSize; render(); }
   if (typeof IntersectionObserver !== 'undefined') { observer = observerFactory(entries => { if (entries.some(entry => entry.isIntersecting)) loadMore(); }); observer.observe(sentinel); }
   else scroller.addEventListener('scroll', () => { if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 100) loadMore(); });
   return {
     update(items) { tasks = [...items].sort(compare || ((a,b) => priority(a) - priority(b) || createdAt(b) - createdAt(a))); render(); },
-    loadMore,
+    loadMore, reveal,
     reset() { limit = pageSize; savedScroll = 0; savedAnchor = []; scroller.scrollTop = 0; },
     clear() { for (const node of nodes.values()) node.remove(); nodes.clear(); tasks = []; this.reset(); sentinel.hidden = true; },
     resume() { if (visiblePanel()) { scroller.scrollTop = savedScroll; render(savedAnchor); } },

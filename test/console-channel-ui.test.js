@@ -1,4 +1,5 @@
 import { setButtonIcon } from '../public/ui-primitives.js';
+import { listCoverageGaps } from '../public/playback-coverage.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,12 +22,13 @@ class Element {
 }
 function harness() {
   const elements = new Map(); const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-  const state = { cameras: [], dvrs: [], selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', segmentRequestId: 0, dvrChannelRequestId: 0, segments: [], inMs: 1000, outMs: 2000, busy: false };
+  const state = { cameras: [], dvrs: [], selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', segmentRequestId: 0, dvrChannelRequestId: 0, segments: [{ startMs: 0, endMs: 3000 }], inMs: 1000, outMs: 2000, busy: false };
   const requests = [], loads = [], liveStarts = [], loadOptions = [];
-  const context = vm.createContext({ setButtonIcon, setTimeout() {}, clearTimeout() {}, state, $, document: { createElement: () => new Element() }, today: () => '2026-09-30', notify() {}, setPlaybackNotice() {}, startLive() { liveStarts.push(state.selectedCamera); }, startDvrLive() {}, clearReplay() {}, renderTimeline() {}, updateSelection() { $('export-range').disabled = state.busy; }, loadSegments: async options => { loads.push(state.playbackSource); loadOptions.push(options); }, body: JSON.stringify, wallTime: ms => String(ms), navigate() {}, refreshState: async () => {}, taskProgressPresentation, taskStageLabel, taskProgressCaption, uploadProgressCaption, Date, URLSearchParams,
+  const context = vm.createContext({ setButtonIcon, setTimeout() {}, clearTimeout() {}, state, $, document: { body: { dataset: { view: 'replay' } }, createElement: () => new Element() }, AbortController, consoleSession: 1, exportSubmission: null, listCoverageGaps, rememberSubmittedTask() {}, today: () => '2026-09-30', notify() {}, setPlaybackNotice() {}, startLive() { liveStarts.push(state.selectedCamera); }, startDvrLive() {}, clearReplay() {}, renderTimeline() {}, updateSelection() { $('export-range').disabled = state.busy; }, loadSegments: async options => { loads.push(state.playbackSource); loadOptions.push(options); }, body: JSON.stringify, wallTime: ms => String(ms), navigate() {}, refreshState: async () => {}, taskProgressPresentation, taskStageLabel, taskProgressCaption, uploadProgressCaption, Date, URLSearchParams,
     api: async (url, options) => { requests.push({ url, options }); return url.endsWith('/channels') ? { channels: [{ id: '101', name: '前场' }, { id: '201', name: '后场' }] } : { status: 'queued', queuePosition: 1 }; },
   });
   vm.runInContext(script.slice(script.indexOf('function fillCameras('), script.indexOf('function segmentBounds(')), context);
+  vm.runInContext(script.slice(script.indexOf('function playbackContextKey('), script.indexOf('function requirePlaybackContext(')), context);
   vm.runInContext(script.slice(script.indexOf("$('export-range').addEventListener('click'"), script.indexOf('function prettyBytes(')), context);
   vm.runInContext(script.slice(script.indexOf('const statusLabels ='), script.indexOf('async function refreshState()')), context);
   return { context, $, state, requests, loads, liveStarts, loadOptions };
