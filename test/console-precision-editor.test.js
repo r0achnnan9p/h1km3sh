@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../public/console.js', import.meta.url), 'utf8');
 function editor() {
   const state = { date: '2026-10-08', playbackSource: 'mediamtx', selectedCamera: 'camera-a', configRevision: 'revision-1', playbackSelectionVersion: 3, cursorMs: 12000, inMs: 10000, outMs: 30000 };
-  const actions = new Map(), input = { value: '12000', setAttribute() {}, focus() {} };
+  const actions = new Map(), input = { value: '12000', setAttribute() {}, focus() { this.focused = true; }, select() { this.selected = true; }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; } };
   const sheet = { content: {}, actions: {}, error: {}, close() { this.closed = true; }, setPending(value) { this.pending = value; } };
   const jumps = [];
   const context = vm.createContext({ state, openDialog: () => sheet, labelledInput: () => input, enhanceTimeInput: node => node,
@@ -68,4 +68,14 @@ test('提交提示到期隐藏操作；键盘焦点停留时保留提示，点�
   context.notify('已提交', false, { kind: 'exports', range: '08:00:00 → 08:00:10' });
   toast.children.find(node => node.label === '查看任务').listeners.click();
   assert.deepEqual(routes, ['tasks']); assert.deepEqual(selectedTabs, [false]); assert.equal(toast.hidden, true);
+});
+
+
+test('精确定位弹层同步全选旧时间，直接覆盖时不会重新定位或改动入出点', () => {
+  const h = editor();
+  assert.equal(h.input.focused, true); assert.equal(h.input.selected, true);
+  assert.equal(h.input.selectionStart, 0); assert.equal(h.input.selectionEnd, h.input.value.length);
+  h.input.value = h.input.value.slice(0, h.input.selectionStart) + '22000' + h.input.value.slice(h.input.selectionEnd);
+  assert.equal(h.input.value, '22000'); assert.equal(h.state.cursorMs, 12000);
+  assert.deepEqual([h.state.inMs, h.state.outMs], [10000, 30000]); assert.equal(h.jumps.length, 0);
 });

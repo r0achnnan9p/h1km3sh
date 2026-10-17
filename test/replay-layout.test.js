@@ -47,6 +47,8 @@ test('replay reserves the existing app viewport for a shrinking video and reacha
   assert.equal(editor['min-height'], '0'); assert.equal(editor['flex-direction'], 'column');
   assert.match(video.flex, /\b1\b/); assert.ok(pixels(video['min-height']) < 100);
   assert.equal(style(prefix + ' .player-wrap video')['object-fit'], 'contain');
+  const collapsed = style(prefix + "[data-chrome-overlay='false'][data-chrome-idle='true'] :is(.replay-topbar,.replay-control-panel)");
+  assert.equal(collapsed.display, 'none', 'manual hiding in normal layouts returns control space to the flexible video');
   assert.doesNotMatch(css, /(?:height|min-height|max-height):\s*(?:430|932)px/);
 });
 
@@ -63,7 +65,7 @@ test('date, transport, mode and split boundary actions retain finger-sized hit t
 });
 
 test('landscape and fullscreen hide the whole chrome together and keep keyboard wake available', () => {
-  const idle = rules.filter(rule => rule.selector.includes('focus-replay') && rule.selector.includes("[data-chrome-idle='true']"));
+  const idle = rules.filter(rule => rule.selector.includes('focus-replay') && rule.selector.includes("[data-chrome-idle='true']") && !rule.selector.includes("[data-chrome-overlay='false']"));
   assert.ok(idle.some(rule => rule.selector.includes(':fullscreen')));
   assert.ok(idle.some(rule => rule.conditions.some(condition => condition.includes('orientation:landscape'))));
   for (const rule of idle) {
