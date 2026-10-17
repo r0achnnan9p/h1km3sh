@@ -213,7 +213,7 @@ test('day edges and today clamp repeated positions without changing marks', () =
     const h = harness({ date: mode === 'today' ? '2020-02-04' : '2020-02-03' }); h.state.followPlayback = false;
     h.state.cursorMs = mode === 'start' ? h.day + 5000 : mode === 'end' ? h.day + 86395000 : Math.floor(h.now / 1000) * 1000 - 5000;
     const before = marks(h.state), id = mode === 'start' ? 'skip-back' : 'skip-forward'; h.hold(id); h.timers.advance(1000);
-    const expected = mode === 'start' ? h.day : mode === 'end' ? h.day + 86399999 : Math.floor(h.now / 1000) * 1000;
+    const expected = mode === 'start' ? h.day : mode === 'end' ? h.day + 86399000 : Math.floor(h.now / 1000) * 1000;
     assert.equal(h.state.cursorMs, expected, mode); assert.deepEqual(marks(h.state), before);
     assert.equal(h.calls.previews.length, 0); assert.equal(h.calls.seeks.length, 0);
     h.release(id); assert.equal(h.calls.previews.length, 1); assert.equal(h.calls.previews[0].ms, expected);
@@ -265,5 +265,34 @@ test('late last-frame fallback callbacks cannot seek or move the position select
     h.sampleTime(29.999); h.context.finishLastRecordingFrame();
     assert.equal(h.state.cursorMs, target, String(seeking)); assert.equal(h.state.timelineStartMs, window);
     assert.equal(h.calls.seeks.length, 0); assert.equal(h.calls.previews.length, 0);
+  }
+});
+
+
+test('十秒短按和长按从媒体小数时钟定位到整秒，缓冲快路也只提交一次', () => {
+  for (const buffered of [false, true]) for (const held of [false, true]) for (const direction of [-1, 1]) {
+    const h = harness({ buffered }), id = direction < 0 ? 'skip-back' : 'skip-forward';
+    h.sampleTime(10.234);
+    if (held) { h.hold(id); h.timers.advance(180); }
+    else { h.$(id).emit('pointerdown'); h.timers.advance(100); }
+    const expected = Math.max(h.day, h.base + (10 + direction * (held ? 20 : 10)) * 1000);
+    h.release(id);
+    assert.equal(h.state.cursorMs, expected, `${buffered}/${held}/${direction}`);
+    assert.equal(h.state.cursorMs % 1000, 0);
+    assert.equal(h.calls.previews.length + h.calls.seeks.length, 1);
+    if (h.calls.previews.length) assert.equal(h.calls.previews[0].ms, expected);
+    if (h.calls.seeks.length) assert.equal(h.calls.seeks[0], (expected - h.base) / 1000);
+    assert.deepEqual(marks(h.state), [h.base + 1000, h.base + 90000]);
+  }
+});
+
+test('十秒短按在日期末尾停于23:59:59，今日夹到当前整秒，回退不越日', () => {
+  for (const mode of ['start', 'end', 'today']) {
+    const h = harness({ paused: true, date: mode === 'today' ? '2020-02-04' : '2020-02-03' }); h.state.followPlayback = false;
+    h.state.cursorMs = mode === 'start' ? h.day + 5234 : mode === 'end' ? h.day + 86395234 : h.now - 5234;
+    h.context.stepReplay(mode === 'start' ? -10 : 10);
+    const expected = mode === 'start' ? h.day : mode === 'end' ? h.day + 86399000 : Math.floor(h.now / 1000) * 1000;
+    assert.deepEqual(h.calls.previews, [{ ms: expected, autoplay: false }]);
+    assert.equal(h.state.cursorMs, expected); assert.equal(h.state.cursorMs % 1000, 0);
   }
 });

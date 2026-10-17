@@ -94,3 +94,16 @@ test('marking an offscreen paused point makes the new marker visible without cha
   const view = h.context.timelineWindow(); assert.equal(h.state.inMs, 8 * 3600000);
   assert.ok(h.state.inMs >= view.start && h.state.inMs <= view.end); assert.equal(view.span, 3600000);
 });
+
+
+test('全天自然播放保留媒体毫秒时钟和固定日界，不重复重建整条时间尺', () => {
+  const h = harness(); h.state.timelineSpanSeconds = 86400; h.state.timelineStartMs = 0;
+  let renders = 0, updates = 0; h.context.renderTimeline = () => renders++; h.context.updateCursor = () => updates++;
+  for (const seconds of [2.234, 3.789, 3.999]) {
+    playing(h, seconds); h.timeupdate();
+    assert.equal(h.state.cursorMs, 5226000 + seconds * 1000);
+    assert.equal(h.state.timelineStartMs, 0);
+  }
+  assert.equal(renders, 0); assert.equal(updates, 3);
+  assert.equal(h.state.cursorMs % 1000, 999, 'natural playback still follows the precise media clock');
+});

@@ -44,9 +44,9 @@ for (const event of ['resize', 'orientationchange', 'pageshow']) window.addEvent
 for (const event of ['resize', 'scroll']) window.visualViewport?.addEventListener(event, scheduleStandaloneViewport);
 document.addEventListener('fullscreenchange', scheduleStandaloneViewport);
 
-// Detail-window zoom steps (seconds); the span lives in state.timelineSpanSeconds.
-const TIMELINE_SPANS = [30, 300, 3600, 86400];
-const DEFAULT_TIMELINE_SPAN_SECONDS = 300;
+// Visible ruler windows (seconds), ordered from the whole day to one-second ticks.
+const TIMELINE_SPANS = [86400, 3600, 300, 30];
+const DEFAULT_TIMELINE_SPAN_SECONDS = 86400;
 const APP_BASE_PATH = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const appPath = value => `${APP_BASE_PATH}${value.startsWith('/') ? value : `/${value}`}`;
 const state = { cameras: [], dvrs: [], segments: [], outputs: [], tasks: [], uploads: [], outputSort: 'newest', selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', previewMode: 'replay', date: '', cursorMs: null, inMs: null, outMs: null, timelineSpanSeconds: DEFAULT_TIMELINE_SPAN_SECONDS, timelineStartMs: null, dragging: false, dragSource: '', dragPointerId: null, playRequestId: 0, segmentRequestId: 0, dvrChannelRequestId: 0, playbackAutoplay: false, playbackFormats: [], playFormat: '', playBounds: null, followPlayback: false, scrubFadeTimer: null, busy: false, source: null, lastTasks: '' };
@@ -263,11 +263,6 @@ document.querySelectorAll('[data-view]').forEach(button => button.addEventListen
 const slidingNavigation = createSlidingNavigation({ nav: document.querySelector('.mobile-nav'), activate: view => navigate(view) });
 function setupReplayControls() {
   const view = $('view-replay'), panel = $('replay-control-panel'), topbar = view.querySelector('.replay-topbar');
-  const applyMode = mode => {
-    view.dataset.replayMode = mode;
-    $('replay-selection-editor').hidden = mode !== 'select';
-    for (const value of ['watch', 'select']) $(`replay-mode-${value}`).setAttribute('aria-pressed', String(value === mode));
-  };
   const applyVisibility = visible => {
     view.dataset.chromeIdle = String(!visible);
     for (const node of [panel, topbar]) {
@@ -277,7 +272,7 @@ function setupReplayControls() {
     }
   };
   const controller = createReplayControls({
-    onModeChange: applyMode, onVisibilityChange: applyVisibility,
+    onVisibilityChange: applyVisibility,
     canHide: () => {
       const focused = document.activeElement;
       const editing = focused instanceof HTMLElement && (focused.isContentEditable || focused.matches('input, textarea, select'));
@@ -285,7 +280,7 @@ function setupReplayControls() {
       return !state.dragging && !state.holdSeek && !state.busy && !activeDialog?.open && !editing && !keyboardFocus;
     },
   });
-  applyMode(controller.mode); applyVisibility(controller.visible);
+  applyVisibility(controller.visible);
   const consume = event => { event.preventDefault(); event.stopImmediatePropagation(); };
   const isPlaybackSurface = target => target instanceof HTMLElement && $('player-wrap').contains(target)
     && !target.closest?.('button, a, input, textarea, select, [role="button"], [role="slider"], [contenteditable], dialog');
@@ -302,7 +297,6 @@ function setupReplayControls() {
   view.addEventListener('focusout', () => { if (controller.visible) controller.show(); });
   // Wake before Tab navigation and keyboard shortcuts; hidden controls are inert.
   document.addEventListener('keydown', () => { if (document.body.dataset.view === 'replay') controller.show(); }, true);
-  for (const mode of ['watch', 'select']) $(`replay-mode-${mode}`).addEventListener('click', () => controller.setMode(mode));
   for (const id of ['date-select', 'playback-source', 'camera-select', 'dvr-select', 'dvr-channel']) $(id).addEventListener('change', () => controller.reset(), true);
   window.addEventListener('blur', () => { controller.reset(); controller.hold('window'); });
   window.addEventListener('focus', () => { controller.release('window'); syncReplayControls(); });
@@ -451,7 +445,8 @@ $('dvr-channel').addEventListener('change', () => {
 
 function segmentBounds(segment) { const start = Date.parse(segment.start); return { start, end: start + Number(segment.duration) * 1000 }; }
 function timelineWindow() {
-  const day = dateStart(state.date), span = (state.timelineSpanSeconds || 300) * 1000;
+  const day = dateStart(state.date), span = (state.timelineSpanSeconds || 86400) * 1000;
+  if (span === 86_400_000) return { start: day, end: day + span, span };
   // Pad the first/last half span so midnight and the latest second can still
   // sit under the fixed centre needle. Out-of-day/future padding is not seekable.
   const center = clampTimelineCenter((state.timelineStartMs ?? day - span / 2) + span / 2);
@@ -469,34 +464,62 @@ function clampTimelineCenter(ms) {
 }
 function timelinePercent(ms, start, span) { return Math.max(0, Math.min(100, (ms - start) / span * 100)); }
 function renderOverview() {
-  const day = dateStart(state.date), track = $('timeline-overview'), bands = $('overview-segments');
-  bands.replaceChildren();
-  for (const segment of state.segments) {
-    const bounds = segmentBounds(segment), start = Math.max(day, bounds.start), end = Math.min(day + 86_400_000, bounds.end);
-    if (end <= start) continue;
-    const band = document.createElement('span'); band.className = 'overview-segment';
-    band.style.left = `${timelinePercent(start, day, 86_400_000)}%`;
-    band.style.width = `${Math.max((end - start) / 86_400_000 * 100, 0.12)}%`;
+  const day = dateStart(state.date), dayEnd = day + 86_400_000, limit = Math.min(dayEnd, timelineLimit());
+  const track = $('timeline-overview'), bands = $('overview-segments'), window = timelineWindow();
+  const { start: viewStart, end: viewEnd, span } = window;
+  const paint = (from, to, className) => {
+    const start = Math.max(from, viewStart), end = Math.min(to, viewEnd);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+    const band = document.createElement('span'); band.className = className;
+    band.style.left = `${(start - viewStart) / span * 100}%`;
+    // Coverage is geometry, not a touch target: never widen short recordings or gaps.
+    band.style.width = `${(end - start) / span * 100}%`;
     band.title = `${wallTime(start)} — ${wallTime(end)}`; bands.append(band);
+  };
+  bands.replaceChildren();
+  paint(viewStart, day, 'overview-outside'); paint(limit, viewEnd, 'overview-outside');
+  let previousEnd = null;
+  for (const segment of state.segments) {
+    const bounds = segmentBounds(segment), start = Math.max(day, bounds.start), end = Math.min(limit, bounds.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    if (previousEnd !== null && start > previousEnd) paint(previousEnd, start, 'overview-gap');
+    paint(start, end, 'overview-segment');
+    previousEnd = previousEnd === null ? end : Math.max(previousEnd, end);
   }
-  const window = timelineWindow(), viewport = $('overview-window');
-  viewport.style.left = `${(window.start - day) / 86_400_000 * 100}%`;
-  viewport.style.width = `${window.span / 86_400_000 * 100}%`;
-  viewport.style.clipPath = `inset(0 ${Math.max(0, window.end - day - 86_400_000) / window.span * 100}% 0 ${Math.max(0, day - window.start) / window.span * 100}%)`;
-  const selection = $('overview-selection');
-  if (state.inMs === null || state.outMs === null || state.outMs <= state.inMs) selection.hidden = true;
-  else {
-    const start = Math.max(day, state.inMs), end = Math.min(day + 86_400_000, state.outMs);
-    selection.hidden = end <= start;
-    if (!selection.hidden) {
-      selection.style.left = `${timelinePercent(start, day, 86_400_000)}%`;
-      selection.style.width = `${(end - start) / 86_400_000 * 100}%`;
+  const ruler = $('overview-ruler');
+  if (ruler?.replaceChildren) {
+    ruler.replaceChildren();
+    const seconds = span / 1000;
+    const minor = seconds <= 30 ? 1 : seconds <= 300 ? 10 : seconds <= 3600 ? 60 : 3600;
+    const major = seconds <= 30 ? 10 : seconds <= 300 ? 120 : seconds <= 3600 ? 1200 : 28800;
+    for (let ms = Math.ceil(Math.max(viewStart, day) / (minor * 1000)) * minor * 1000; ms <= Math.min(viewEnd, span === 86_400_000 ? dayEnd : limit); ms += minor * 1000) {
+      const tick = document.createElement('span'), second = Math.round((ms - day) / 1000), ratio = (ms - viewStart) / span;
+      tick.className = 'overview-tick'; tick.style.left = `${ratio * 100}%`;
+      const labelled = second % major === 0 || ms === dayEnd;
+      tick.classList.toggle('major', labelled); tick.classList.toggle('hour', second % (major / 2) === 0);
+      if (labelled) {
+        const label = document.createElement('small');
+        label.textContent = ms === dayEnd ? '24:00' : wallTime(ms).slice(11, seconds <= 30 ? 19 : 16);
+        if (ratio < .08 || ratio > .92) { tick.dataset.edge = ratio < .08 ? 'start' : 'end'; label.dataset.edge = tick.dataset.edge; }
+        tick.append(label);
+      }
+      ruler.append(tick);
     }
   }
+  $('overview-window').hidden = true;
+  const selection = $('overview-selection');
+  const from = Math.max(state.inMs ?? viewEnd, viewStart, day), to = Math.min(state.outMs ?? viewStart, viewEnd, dayEnd);
+  selection.hidden = state.inMs === null || state.outMs === null || to <= from;
+  if (!selection.hidden) { selection.style.left = `${(from - viewStart) / span * 100}%`; selection.style.width = `${(to - from) / span * 100}%`; }
   const cursor = $('overview-cursor');
-  cursor.hidden = state.previewMode === 'live' || state.cursorMs === null || state.cursorMs < day || state.cursorMs >= day + 86_400_000;
-  if (!cursor.hidden) cursor.style.left = `${timelinePercent(state.cursorMs, day, 86_400_000)}%`;
+  cursor.hidden = state.previewMode === 'live' || state.cursorMs === null || state.cursorMs < day || state.cursorMs >= dayEnd;
+  if (!cursor.hidden) cursor.style.left = `${timelinePercent(state.cursorMs, viewStart, span)}%`;
+  track.dataset.relative = String(span !== 86_400_000);
+  track.setAttribute('aria-label', `${span === 86_400_000 ? '全天时间尺，00:00至24:00，点按或拖动粗选' : `中心时间尺，可见${span / 1000}秒，左右拖动定位`}；左右键微调1秒，Shift微调10秒`);
+  track.setAttribute('aria-valuemin', '0');
+  track.setAttribute('aria-valuemax', String(Math.max(0, Math.min(86399, Math.floor((limit - day) / 1000)))));
   track.setAttribute('aria-valuenow', String(Math.round(daySeconds(state.cursorMs ?? day))));
+  track.setAttribute('aria-disabled', String(!state.segments.length));
   track.setAttribute('aria-valuetext', state.previewMode === 'live' ? '实时预览模式，时间轴用于选择录像' : state.cursorMs === null ? state.date : `${state.playBounds?.sdkTimingUnknown ? '请求 ' : ''}${wallTime(state.cursorMs)}`);
   $('overview-time-readout').textContent = state.previewMode === 'live' || state.cursorMs === null
     ? ''
@@ -507,18 +530,6 @@ function updateTimelineLabels() {
   $('timeline-start-label').textContent = `${start < dateStart(state.date) ? '前日 ' : ''}${wallTime(start, false).slice(11)}`;
   $('timeline-middle-label').textContent = wallTime(middle, false).slice(11);
   $('timeline-end-label').textContent = end === dateStart(state.date) + 86_400_000 ? '24:00' : `${end > dateStart(state.date) + 86_400_000 ? '次日 ' : ''}${wallTime(end, false).slice(11)}`;
-  const ruler = $('timeline-ruler');
-  if (ruler?.replaceChildren) {
-    ruler.replaceChildren();
-    const seconds = span / 1000, minor = seconds <= 30 ? 1 : seconds <= 300 ? 10 : seconds <= 3600 ? 120 : 3600;
-    const major = seconds <= 30 ? 10 : seconds <= 300 ? 60 : seconds <= 3600 ? 600 : 14400;
-    for (let ms = Math.ceil(start / (minor * 1000)) * minor * 1000; ms <= end; ms += minor * 1000) {
-      const tick = document.createElement('span'); tick.className = 'ruler-tick'; tick.style.left = `${(ms - start) / span * 100}%`;
-      const second = Math.round(ms / 1000); tick.classList.toggle('major', second % major === 0); tick.classList.toggle('medium', second % (major / 2) === 0);
-      if (second % major === 0) tick.textContent = wallTime(ms).slice(11, seconds <= 30 ? 19 : 16);
-      ruler.append(tick);
-    }
-  }
   const hasRecordings = state.segments.length > 0;
   $('transport-toggle').disabled = $('replay-player').hidden && !hasRecordings;
   $('skip-back').disabled = state.previewMode === 'live' || !hasRecordings;
@@ -526,11 +537,14 @@ function updateTimelineLabels() {
   $('fine-back').disabled = $('fine-forward').disabled = state.previewMode === 'live' || !hasRecordings;
 }
 function setTimelineWindow(centerMs) {
-  state.timelineStartMs = clampTimelineCenter(centerMs) - timelineWindow().span / 2;
+  const span = timelineWindow().span;
+  state.timelineStartMs = span === 86_400_000 ? dateStart(state.date) : clampTimelineCenter(centerMs) - span / 2;
   renderTimeline();
 }
 function setTimelineSpan(seconds) {
   if (!TIMELINE_SPANS.includes(seconds) || state.timelineSpanSeconds === seconds) return;
+  // Cancel both active and released-but-uncommitted ruler work before changing scale.
+  precisionTimeline?.cancel();
   const view = timelineWindow(), center = state.cursorMs ?? view.start + view.span / 2;
   state.timelineSpanSeconds = seconds;
   setTimelineWindow(center);
@@ -545,20 +559,15 @@ function syncTimelineZoomButtons() {
 function renderTimeline() {
   const timeline = $('timeline'); timeline.querySelectorAll('.segment').forEach(node => node.remove());
   const empty = timeline.querySelector('.timeline-empty');
-  const { start: viewStart, end: viewEnd, span } = timelineWindow();
+  const { start: viewStart, end: viewEnd } = timelineWindow();
   let visibleCount = 0;
-  state.segments.forEach((segment, index) => {
-    const { start, end } = segmentBounds(segment), clipStart = Math.max(start, viewStart), clipEnd = Math.min(end, viewEnd);
-    if (clipEnd <= clipStart) return;
-    visibleCount++;
-    const block = document.createElement('button'); block.type = 'button'; block.className = 'segment'; block.dataset.index = String(index);
-    block.style.left = `${timelinePercent(clipStart, viewStart, span)}%`; block.style.width = `${Math.max((clipEnd - clipStart) / span * 100, 0.8)}%`;
-    block.title = `${wallTime(clipStart)} — ${wallTime(clipEnd)}`; block.setAttribute('aria-label', block.title);
-    block.addEventListener('click', event => { if (event.detail === 0) { event.stopPropagation(); jumpToTimelineTime(clipStart, 'detail'); } }); timeline.append(block);
-  });
+  for (const segment of state.segments) {
+    const { start, end } = segmentBounds(segment);
+    if (Math.min(end, viewEnd) > Math.max(start, viewStart)) visibleCount++;
+  }
   empty.textContent = !state.segments.length
     ? state.playbackSource === 'mediamtx' ? 'MediaMTX 这一天没有录像；可切换到「海康 DVR 回放」查询。' : '海康 DVR 这一天没有录像区段。'
-    : '当前时间范围内没有录像；点上方全天概览切换时段';
+    : '当前时间范围内没有录像；切到全天选择其他时段';
   empty.hidden = visibleCount > 0;
   renderOverview(); updateTimelineLabels();
   updateCursor(); updateSelection();
@@ -614,7 +623,8 @@ function updateCursor() {
   // Playback, keyboard seeks and window drags share one centred time. Marker
   // drags retain their grip mapping until release, then recenter as normal.
   if (state.previewMode !== 'live' && state.cursorMs !== null && state.date && !state.dragBoundary) {
-    const start = clampTimelineCenter(state.cursorMs) - timelineWindow().span / 2;
+    const span = timelineWindow().span;
+    const start = span === 86_400_000 ? dateStart(state.date) : clampTimelineCenter(state.cursorMs) - span / 2;
     if (state.timelineStartMs !== start) { state.timelineStartMs = start; renderTimeline(); return; }
   }
   $('mark-in').disabled = $('mark-out').disabled = state.cursorMs === null || state.previewMode === 'live' || state.playBounds?.sdkTimingUnknown === true;
@@ -635,7 +645,7 @@ function updateCursor() {
   cursor.hidden = state.cursorMs < window.start || state.cursorMs > window.end;
   if (!cursor.hidden) cursor.style.left = `${timelinePercent(state.cursorMs, window.start, window.span)}%`;
   overviewCursor.hidden = state.cursorMs < day || state.cursorMs >= day + 86_400_000;
-  if (!overviewCursor.hidden) overviewCursor.style.left = `${timelinePercent(state.cursorMs, day, 86_400_000)}%`;
+  if (!overviewCursor.hidden) overviewCursor.style.left = `${timelinePercent(state.cursorMs, window.start, window.span)}%`;
   $('timeline').setAttribute('aria-label', `精细录像时间轴，拖动窗口，中心时间 ${state.playBounds?.sdkTimingUnknown ? '请求位置 ' : ''}${wallTime(state.cursorMs)}；左右键微调1秒，Shift加左右键微调10秒`);
   document.querySelectorAll('.segment').forEach(block => {
     const segment = state.segments[Number(block.dataset.index)];
@@ -711,19 +721,17 @@ function updateSelection() {
   const window = timelineWindow(), start = Math.max(inMs, window.start), end = Math.min(outMs, window.end);
   overlay.hidden = end <= start;
   if (!overlay.hidden) { overlay.style.left = `${timelinePercent(start, window.start, window.span)}%`; overlay.style.width = `${(end - start) / window.span * 100}%`; }
-  const day = dateStart(state.date), overviewStart = Math.max(inMs, day), overviewEnd = Math.min(outMs, day + 86_400_000);
-  $('overview-selection').hidden = overviewEnd <= overviewStart;
-  if (!$('overview-selection').hidden) {
-    $('overview-selection').style.left = `${timelinePercent(overviewStart, day, 86_400_000)}%`;
-    $('overview-selection').style.width = `${(overviewEnd - overviewStart) / 86_400_000 * 100}%`;
-  }
+  const selection = $('overview-selection'); selection.hidden = overlay.hidden;
+  if (!selection.hidden) { selection.style.left = overlay.style.left; selection.style.width = overlay.style.width; }
 }
 function clearReplay() {
   cancelReplayHold();
+  // A pressed ruler may not have crossed the movement threshold yet. Cancel
+  // its captured pointer and released-but-pending commit before clearing media.
+  interruptTimelineScrub();
   state.mediaLive?.close(); state.mediaLive = null;
   state.lastFramePending = null;
   stopHlsPreview();
-  if (state.dragging || state.pendingScrub) interruptTimelineScrub();
   const video = $('replay-player');
   state.playRequestId++; state.pendingLocalSeek = null; state.previewMode = 'replay';
   state.previewFailed = false; state.playbackWaiting = false;
@@ -1089,48 +1097,44 @@ function updateTimelineHover(event) {
   const marker = $('timeline-hover');
   if (!marker) return;
   if (window.innerWidth < 1024 || event.pointerType !== 'mouse' || event.buttons || state.dragging) { marker.hidden = true; return; }
-  const rect = $('timeline').getBoundingClientRect();
+  const rect = $('timeline-overview').getBoundingClientRect();
   if (!(rect.width > 0)) { marker.hidden = true; return; }
   const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const view = timelineWindow(), time = Math.round((view.start + ratio * view.span) / 1000) * 1000;
+  if (time < dateStart(state.date) || time > timelineLimit()) { marker.hidden = true; return; }
   marker.hidden = false; marker.style.left = `${ratio * 100}%`;
   marker.dataset.edge = ratio < .15 ? 'start' : ratio > .85 ? 'end' : 'middle';
-  marker.firstElementChild.textContent = wallTime(timeAtTimeline(event)).slice(11);
+  marker.firstElementChild.textContent = time === dateStart(state.date) + 86_400_000 ? '24:00:00' : wallTime(time).slice(11);
 }
-$('timeline').addEventListener('pointerdown', event => beginTimelineScrub(event, 'detail'));
-$('timeline').addEventListener('pointermove', updateTimelineHover);
-$('timeline').addEventListener('pointerleave', () => { $('timeline-hover').hidden = true; });
-$('timeline').addEventListener('pointerdown', () => { $('timeline-hover').hidden = true; });
-
-$('timeline').addEventListener('pointermove', event => moveTimelineScrub(event, 'detail'));
-$('timeline').addEventListener('pointerup', event => endTimelineScrub(event, 'detail'));
-$('timeline').addEventListener('pointercancel', cancelTimelineScrub);
-$('timeline').addEventListener('lostpointercapture', cancelTimelineScrub);
+// The hidden compatibility timeline has no pointer/keyboard driver. All real
+// timeline gestures belong to the one visible ruler below.
+$('timeline-overview').addEventListener('pointermove', updateTimelineHover);
+for (const event of ['pointerdown', 'pointerleave']) $('timeline-overview').addEventListener(event, () => { $('timeline-hover').hidden = true; });
 setupPrecisionTimeline();
 function setupPrecisionTimeline() {
   let snapshot = null;
-  const finish = () => { state.dragging = false; state.dragSource = ''; document.body.classList.remove('precision-scrubbing'); fadeScrubTime(); };
+  const finish = () => { state.dragging = false; state.dragSource = ''; $('timeline-overview').dataset.dragging = 'false'; fadeScrubTime(); };
   precisionTimeline = createPrecisionTimeline({
     element: $('timeline-overview'),
     getTime: () => state.segments.length ? state.cursorMs ?? dateStart(state.date) : NaN,
     getBounds: () => ({ start: dateStart(state.date), end: Math.min(timelineLimit(), dateStart(state.date) + 86_399_000) }),
+    getSpan: () => (state.timelineSpanSeconds || DEFAULT_TIMELINE_SPAN_SECONDS) * 1000,
     getContext: () => JSON.stringify([consoleSession, state.playbackSource, state.selectedCamera, $('dvr-select').value, $('dvr-channel').value, state.date]),
     onStart: () => {
-      snapshot = { ...scrubSnapshot(), timelineSpanSeconds: state.timelineSpanSeconds };
-      state.dragging = true; state.dragSource = 'overview';
+      // Ruler gestures own only the candidate position, never the marked range.
+      snapshot = { cursorMs: state.cursorMs, timelineStartMs: state.timelineStartMs };
+      state.dragging = true; state.dragSource = 'overview'; $('timeline-overview').dataset.dragging = 'true';
       const video = $('replay-player'); if (!video.hidden && !video.paused) video.pause();
     },
-    onMove: ({ time, span, distance }) => {
-      state.cursorMs = clampTimelineCenter(time); state.timelineSpanSeconds = span / 1000;
-      document.body.classList.toggle('precision-scrubbing', distance > 40);
-      setTimelineWindow(state.cursorMs); showScrubTime(state.cursorMs);
+    onMove: ({ time }) => {
+      state.cursorMs = time;
+      setTimelineWindow(time); showScrubTime(time);
     },
     onCommit: async time => {
-      state.timelineSpanSeconds = snapshot?.timelineSpanSeconds ?? DEFAULT_TIMELINE_SPAN_SECONDS;
       snapshot = null; finish(); await jumpToTimelineTime(time, 'overview', { autoplay: false });
     },
     onCancel: ({ restore }) => {
       if (restore && snapshot) Object.assign(state, snapshot);
-      else if (snapshot) state.timelineSpanSeconds = snapshot.timelineSpanSeconds;
       snapshot = null; finish(); if (restore) renderTimeline();
     },
     onError: error => setPlaybackNotice(error.message, true),
@@ -1319,7 +1323,7 @@ function stepReplay(seconds) {
   syncPlaybackCursor();
   const video = $('replay-player'), autoplay = !video.hidden && (!video.paused || state.playbackAutoplay === true && !state.followPlayback);
   const day = dateStart(state.date), current = state.cursorMs ?? day;
-  const next = Math.max(day, Math.min(day + 86_400_000 - 1, current + seconds * 1000));
+  const next = Math.max(day, Math.min(timelineLimit(), day + 86_399_000, Math.round(current / 1000) * 1000 + seconds * 1000));
   showScrubTime(next, `${seconds < 0 ? '后退' : '前进'} ${Math.abs(seconds)} 秒`); fadeScrubTime();
   if (tryBufferedReplaySeek(next, autoplay)) return;
   Promise.resolve(jumpToTimelineTime(next, 'detail', { autoplay })).catch(error => setPlaybackNotice(error.message, true));
@@ -1340,7 +1344,7 @@ function repeatReplayHold(hold, seconds) {
   if (!hold || state.holdSeek !== hold) return;
   if (hold.context !== playbackContextKey() || hold.requestId !== state.playRequestId) { cancelReplayHold(); return; }
   const day = dateStart(state.date);
-  hold.targetMs = Math.max(day, Math.min(timelineLimit(), day + 86400000 - 1, hold.targetMs + seconds * 1000));
+  hold.targetMs = Math.max(day, Math.min(timelineLimit(), day + 86_399_000, Math.round(hold.targetMs / 1000) * 1000 + seconds * 1000));
   state.cursorMs = hold.targetMs;
   setTimelineWindow(hold.targetMs);
   showScrubTime(hold.targetMs, seconds < 0 ? '连续后退' : '连续前进');
@@ -1421,20 +1425,13 @@ function interruptTimelineScrub() {
 document.addEventListener('visibilitychange', () => { if (document.hidden) interruptTimelineScrub(); });
 window.addEventListener('blur', interruptTimelineScrub);
 window.addEventListener('pagehide', () => { cancelReplayHold(); if (state.mediaLive) clearReplay(); else stopHlsPreview(); });
-$('timeline').addEventListener('keydown', event => {
-  if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || state.cursorMs === null) return;
-  if (event.target !== $('timeline')) return;
-  event.preventDefault(); if (event.repeat) return; const amount = (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 10 : 1); stepReplay(amount);
-});
 $('timeline-overview').addEventListener('keydown', event => {
   if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || state.cursorMs === null) return;
-  event.preventDefault(); if (event.repeat) return; jumpToTimelineTime(state.cursorMs + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 10_000 : 1000), 'overview');
+  event.preventDefault(); if (event.repeat) return; jumpToTimelineTime(Math.round(state.cursorMs / 1000) * 1000 + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 10_000 : 1000), 'overview');
 });
 $('go-live').addEventListener('click', startLive);
 $('playback-toggle').addEventListener('click', toggleReplayPlayback);
 $('transport-toggle').addEventListener('click', toggleTransportPlayback);
-$('fine-back').addEventListener('click', () => stepReplay(-1));
-$('fine-forward').addEventListener('click', () => stepReplay(1));
 $('playback-mute').addEventListener('click', toggleReplayMute);
 $('replay-player').addEventListener('volumechange', syncReplayMute);
 for (const event of ['loadeddata', 'canplay', 'ended', 'emptied']) $('replay-player').addEventListener(event, syncPlaybackStatus);
@@ -1463,12 +1460,6 @@ $('replay-player').addEventListener('error', () => {
 });
 for (const boundary of ['in', 'out']) {
   $(`edit-${boundary}`).addEventListener('click', () => openRangeEditor(boundary));
-  $(`boundary-${boundary}`).addEventListener('keydown', event => {
-    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-    event.preventDefault(); event.stopPropagation(); if (event.repeat) return;
-    const key = boundary === 'in' ? 'inMs' : 'outMs'; if (state[key] === null) return;
-    state[key] = clampBoundaryTime(state[key] + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 10000 : 1000), boundary); updateSelection(); showScrubTime(state[key], boundary === 'in' ? '开始时间' : '结束时间'); fadeScrubTime();
-  });
 }
 function syncPlaybackCursor() {
   const video = $('replay-player'), bounds = state.playBounds;
@@ -1476,8 +1467,10 @@ function syncPlaybackCursor() {
   // Only a stream that actually started playing may advance the shared cursor.
   if (bounds?.sdkTimingUnknown || state.pendingHlsStart || state.previewMode === 'live' || (state.playFormat === 'hls' && state.hlsStopped) || state.dragging || state.holdSeek || state.pendingScrub || state.pendingLocalSeek || !state.followPlayback || !bounds || video.hidden || video.error || video.seeking || video.readyState < 2 || video.currentSrc !== video.src || !Number.isFinite(video.currentTime)) return;
   state.cursorMs = Math.min(bounds.start + Math.max(0, video.currentTime) * 1000, bounds.start + bounds.duration * 1000, dateStart(state.date) + 86400000);
-  // Natural playback scrolls the hour under the fixed centre needle.
-  const start = clampTimelineCenter(state.cursorMs) - timelineWindow().span / 2;
+  // Natural playback keeps the full day fixed; only local windows follow the
+  // exact media clock beneath their centre needle.
+  const span = timelineWindow().span;
+  const start = span === 86_400_000 ? dateStart(state.date) : clampTimelineCenter(state.cursorMs) - span / 2;
   if (state.timelineStartMs !== start) { state.timelineStartMs = start; renderTimeline(); }
   else updateCursor();
 }
@@ -1513,7 +1506,7 @@ function markPlaybackBoundary(boundary) {
 $('mark-in').addEventListener('click', () => markPlaybackBoundary('in'));
 $('mark-out').addEventListener('click', () => markPlaybackBoundary('out'));
 $('clear-marks').addEventListener('click', () => {
-  if (state.dragging) cancelTimelineScrub({ pointerId: state.dragPointerId });
+  interruptTimelineScrub();
   state.pendingScrub = null; clearMarkedRange(); updateSelection();
 });
 function changeReplayDay(delta) {
@@ -1548,7 +1541,7 @@ document.addEventListener('keydown', event => {
   const playback = event.code === 'Space' && !$('replay-player').hidden;
   const shortcuts = { KeyI: 'mark-in', KeyO: 'mark-out', KeyF: 'replay-fullscreen', KeyM: 'playback-mute', Escape: 'clear-marks' };
   const button = shortcuts[event.code];
-  const span = { Digit1: 30, Digit2: 300, Digit3: 3600, Digit4: 86400 }[event.code];
+  const span = { Digit1: 86400, Digit2: 3600, Digit3: 300, Digit4: 30 }[event.code];
   if (!step && !playback && !button && !span) return;
   // One physical press produces one action; focused timeline handlers take precedence.
   event.preventDefault(); if (event.repeat) return;

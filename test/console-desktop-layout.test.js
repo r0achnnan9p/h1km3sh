@@ -20,13 +20,15 @@ function replayMarkup() {
  const byId=id=>{const matches=nodes.filter(node=>node.attrs.id===id);assert.equal(matches.length,1,id+' must have one control');return matches[0];};
  const within=(node,ancestor)=>{for(let current=node;current;current=current.parent)if(current===ancestor)return true;return false;};
  const byClass=name=>nodes.find(node=>(node.attrs.class||'').split(/\s+/).includes(name));
- return{byId,byClass,within};
+ return{byId,byClass,within,nodes};
 }
 
 test('桌面和手机共用页头来源与选段面板，所有标记和编辑入口保持唯一',()=>{
  const h=replayMarkup(), view=h.byId('view-replay'), topbar=h.byClass('replay-topbar');
  const panel=h.byId('replay-control-panel'), editor=h.byClass('replay-editor'), selection=h.byId('replay-selection-editor');
- assert.equal(view.attrs['data-replay-mode'],'select');
+ assert.equal(view.attrs['data-replay-mode'],undefined);
+ assert.deepEqual(h.nodes.filter(node=>'data-timeline-span' in node.attrs).map(node=>node.attrs['data-timeline-span']),['86400','3600','300','30']);
+ assert.equal(h.nodes.some(node=>/^replay-mode-/.test(node.attrs.id||'')),false);
  assert.ok(h.within(topbar,view));assert.ok(h.within(panel,editor));assert.ok(h.within(selection,panel));
  for(const id of ['quick-source-select','quick-camera-select','previous-day','playback-context','next-day']){
   assert.ok(h.within(h.byId(id),topbar),id+' stays in the header');
@@ -35,7 +37,7 @@ test('桌面和手机共用页头来源与选段面板，所有标记和编辑�
  for(const id of ['mark-in','mark-out','edit-in','edit-out','clear-marks','export-range']){
   const control=h.byId(id);assert.equal(control.tag,'button');assert.ok(h.within(control,selection),id+' stays with the selected range');
  }
- for(const id of ['timeline-overview','transport-toggle','skip-back','skip-forward','replay-mode-watch','replay-mode-select'])assert.ok(h.within(h.byId(id),panel));
+ for(const id of ['timeline-overview','overview-ruler','transport-toggle','skip-back','skip-forward'])assert.ok(h.within(h.byId(id),panel));
 });
 
 class Target {
@@ -60,13 +62,12 @@ class Element extends Target {
  closest(selector){for(let node=this;node;node=node.parentNode)if(node.matches(selector))return node;return null;}
 }
 function replayPresentation({width=932,height=430}={}){
- const ids=['view-replay','replay-control-panel','replay-selection-editor','replay-mode-watch','replay-mode-select',
+ const ids=['view-replay','replay-control-panel','replay-selection-editor',
   'date-select','playback-source','camera-select','dvr-select','dvr-channel','mark-in','mark-out','export-range','replay-player','player-wrap','timeline-overview'];
- const nodes=new Map(ids.map(id=>[id,new Element(id.startsWith('replay-mode-')||['mark-in','mark-out','export-range'].includes(id)?'button':'div')]));
+ const nodes=new Map(ids.map(id=>[id,new Element(['mark-in','mark-out','export-range'].includes(id)?'button':'div')]));
  const get=id=>{assert.ok(nodes.has(id),id);return nodes.get(id);};
  const view=get('view-replay'),panel=get('replay-control-panel'),editor=get('replay-selection-editor'),topbar=new Element();
  topbar.parentNode=view;panel.parentNode=view;editor.parentNode=panel;get('player-wrap').parentNode=view;get('replay-player').parentNode=get('player-wrap');get('timeline-overview').parentNode=panel;
- for(const id of ['replay-mode-watch','replay-mode-select'])get(id).parentNode=panel;
  for(const id of ['mark-in','mark-out','export-range'])get(id).parentNode=editor;
  view.querySelector=selector=>{assert.equal(selector,'.replay-topbar');return topbar;};
  const window=Object.assign(new Target(),{innerWidth:width,innerHeight:height});
@@ -92,24 +93,12 @@ function replayPresentation({width=932,height=430}={}){
  return{get,view,panel,editor,topbar,window,document,state,context,timers,advance,snapshot,click,tap};
 }
 
-test('实际观看/选段按钮只改变面板和无障碍状态，保留播放位置与入出点',()=>{
- const h=replayPresentation(),before=h.snapshot();
- h.click('replay-mode-watch');
- assert.equal(h.view.dataset.replayMode,'watch');assert.equal(h.editor.hidden,true);
- assert.equal(h.get('replay-mode-watch').getAttribute('aria-pressed'),'true');
- assert.equal(h.get('replay-mode-select').getAttribute('aria-pressed'),'false');
- h.click('replay-mode-select');
- assert.equal(h.view.dataset.replayMode,'select');assert.equal(h.editor.hidden,false);
- assert.equal(h.get('replay-mode-select').getAttribute('aria-pressed'),'true');
- assert.equal(h.snapshot(),before);
-});
-
 test('iPhone14PM横屏和两种全屏自动隐藏整个操作面，竖屏与常规桌面保留可见控件',()=>{
  for(const [width,height,idle] of [[430,932,false],[932,430,true],[1440,430,false],[1440,900,false],[960,700,false]]){
   const h=replayPresentation({width,height}),before=h.snapshot();h.advance(2500);
   assert.equal(h.view.dataset.chromeIdle,String(idle),`${width}x${height}`);
   assert.equal(h.panel.inert,idle);assert.equal(h.topbar.inert,idle);
-  assert.equal(h.editor.hidden,false,'select mode still contains mark buttons while its parent hides');
+  assert.equal(h.editor.hidden,false,'mark controls remain available when the shared panel is revealed');
   assert.equal(h.snapshot(),before);
  }
  for(const fullscreen of ['native','css']){
@@ -133,7 +122,7 @@ test('真实捕获路由阻止唤醒触摸误导出，键盘可解除inert并保
  h.document.emit('keydown',{key:'Tab',detail:0});assert.equal(h.panel.inert,false);assert.equal(h.topbar.inert,false);
  const input=new Element('input');h.document.activeElement=input;
  h.advance(5000);assert.equal(h.panel.inert,false,'editable focus protects the panel');
- h.document.activeElement=h.get('replay-mode-select');h.document.activeElement.focusVisible=true;
+ h.document.activeElement=h.get('mark-in');h.document.activeElement.focusVisible=true;
  h.advance(5000);assert.equal(h.panel.inert,false,'keyboard focus protects its target');
  h.document.activeElement=null;h.context.activeDialog={open:true};
  h.advance(5000);assert.equal(h.panel.inert,false,'an open modal protects the panel');
@@ -152,15 +141,15 @@ test('离页和后台事件清理隐藏计时，恢复页面后重新计时且�
 
 test('桌面悬停时间只显示鼠标位置，不改变播放选择，触屏与拖动隐藏',()=>{
  const marker={hidden:true,style:{},dataset:{},firstElementChild:{textContent:''}};
- const state={dragging:false,cursorMs:42};const window={innerWidth:1440};
- const c=vm.createContext({state,window,$:id=>id==='timeline-hover'?marker:{getBoundingClientRect:()=>({left:100,width:400})},wallTime:()=> '2026-10-08 12:34:56',timeAtTimeline:()=>123});
- vm.runInContext(source.slice(source.indexOf('function updateTimelineHover('),source.indexOf("$('timeline').addEventListener('pointerdown'")),c);
- c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:300});assert.equal(marker.hidden,false);assert.equal(marker.style.left,'50%');assert.equal(marker.firstElementChild.textContent,'12:34:56');assert.equal(state.cursorMs,42);
+ const state={dragging:false,cursorMs:42};const window={innerWidth:1440};const view={start:36000000,span:3600000};
+ const c=vm.createContext({state,window,$:id=>{assert.ok(['timeline-hover','timeline-overview'].includes(id));return id==='timeline-hover'?marker:{getBoundingClientRect:()=>({left:100,width:400})};},wallTime:ms=>'2026-10-08 '+new Date(ms).toISOString().slice(11,19),timelineWindow:()=>view,dateStart:()=>0,timelineLimit:()=>86400000});
+ vm.runInContext(source.slice(source.indexOf('function updateTimelineHover('),source.indexOf('// The hidden compatibility timeline')),c);
+ c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:300});assert.equal(marker.hidden,false);assert.equal(marker.style.left,'50%');assert.equal(marker.firstElementChild.textContent,'10:30:00');assert.equal(state.cursorMs,42);
  c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:100});assert.equal(marker.dataset.edge,'start');
  c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:500});assert.equal(marker.dataset.edge,'end');
  c.updateTimelineHover({pointerType:'touch',buttons:0,clientX:300});assert.equal(marker.hidden,true);
  state.dragging=true;c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:300});assert.equal(marker.hidden,true);
- state.dragging=false;window.innerWidth=390;c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:300});assert.equal(marker.hidden,true);
+ state.dragging=false;view.start=-1800000;c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:100});assert.equal(marker.hidden,true,'previous-day padding is not a selectable hover time');window.innerWidth=390;c.updateTimelineHover({pointerType:'mouse',buttons:0,clientX:300});assert.equal(marker.hidden,true);
 });
 
 

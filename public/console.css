@@ -1006,8 +1006,7 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 .timeline-hover[data-edge="start"] > span { transform:none; }
 .timeline-hover[data-edge="end"] > span { transform:translateX(-100%); }
 @media (max-width:1023px) { .timeline-hover { display:none; } }
-/* Approved Precision interaction: one persistent24H surface; local ruler is
-   painted over the captured overview while the pointer moves away. */
+/* One overview surface owns every time window; legacy nodes stay hidden. */
 .precision-layout .timeline-zoom,.precision-layout .overview-head,.precision-layout .time-labels{display:none!important}
 .precision-layout .precision-track-host{position:relative;height:104px;flex:none}
 .precision-layout #view-replay .overview-scroll{display:block;height:100%;margin:0;padding:0;opacity:1}
@@ -1015,10 +1014,7 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 .precision-layout .overview-window{display:none}
 .precision-layout .precision-track-host .timeline-scroll{position:absolute;inset:0;margin:0;padding:0;opacity:0;pointer-events:none}
 .precision-layout .precision-track-host .timeline{height:104px}
-.precision-layout.precision-scrubbing .precision-track-host .timeline-scroll{opacity:1;background:var(--surface);border-radius:var(--radius-field)}
-.precision-layout.precision-scrubbing .overview-scroll{opacity:0}
 .precision-layout .timeline-caption{display:none}
-.precision-layout.precision-scrubbing #view-replay .overview-scroll{opacity:0}
 .precision-layout .mark-controls{gap:12px}
 .precision-layout .mark-controls button{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius-field)}
 .precision-layout .mark-controls button.active{border-color:var(--accent);background:var(--tint)}
@@ -1048,8 +1044,8 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 .precision-layout .overview-tick.hour { top:30px; height:10px; }
 .precision-layout .overview-tick.major { top:24px; height:16px; }
 .precision-layout .overview-tick small { position:absolute; bottom:28px; left:0; transform:translateX(-50%); color:var(--dim); font:12px var(--mono); }
-.precision-layout .overview-tick:first-child small { transform:none; }
-.precision-layout .overview-tick:last-child small { transform:translateX(-100%); }
+.precision-layout .overview-tick small[data-edge='start'] { transform:none; }
+.precision-layout .overview-tick small[data-edge='end'] { transform:translateX(-100%); }
 .precision-layout #view-replay .overview-segments { inset:42px 0 6px; border-radius:0; }
 .precision-layout .overview-segment { background:var(--recording-band); }
 .precision-layout .overview-cursor { top:22px; bottom:4px; background:var(--text); }
@@ -1165,7 +1161,7 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 .gap-interval-duration { flex:0 0 auto; max-width:100%; color:var(--warning); overflow-wrap:anywhere; }
 #skip-back, #skip-forward { touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 
-/* Focus replay: one set of controls for watching and selecting a clip. */
+/* Focus replay: one time ruler and one set of playback and range controls. */
 .precision-layout .app-reload { display:inline-grid; place-items:center; flex:0 0 var(--control); width:var(--control); min-width:var(--control); height:var(--control); min-height:var(--control); padding:var(--space-2); border:0; border-radius:var(--radius-pill); background:transparent; color:var(--text); }
 .precision-layout .app-reload svg { width:24px; height:24px; stroke-width:1.8; }
 @media (hover:hover) and (pointer:fine) {
@@ -1193,6 +1189,7 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay .player-wrap video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
 .precision-layout #view-replay.focus-replay .legacy-playback-toggle { display:none !important; }
 .precision-layout #view-replay.focus-replay .replay-control-panel { display:flex; flex:none; flex-direction:column; min-width:0; gap:var(--space-2); margin:0; padding:0; }
+.precision-layout #view-replay.focus-replay .replay-control-panel > :is(.timeline-section,.replay-selection-editor) { flex-shrink:0; }
 /* A manual video tap gives the freed space back to the player in normal layouts. */
 .precision-layout #view-replay.focus-replay[data-chrome-overlay='false'][data-chrome-idle='true'] :is(.replay-topbar,.replay-control-panel) { display:none; }
 .precision-layout #view-replay.focus-replay .timeline-section { position:static; inset:auto; display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; grid-area:auto; width:100%; height:auto; min-height:0; margin:0; padding:0; gap:var(--space-1) var(--space-2); border:0; border-radius:0; background:transparent; box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; overflow:visible; }
@@ -1207,13 +1204,11 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay .replay-media-tools > button { position:static; inset:auto; display:inline-grid; place-items:center; flex:none; width:var(--control); height:var(--control); min-width:var(--control); min-height:var(--control); margin:0; padding:var(--space-2); border:0; border-radius:var(--radius-pill); background:transparent; color:var(--text); }
 .precision-layout #view-replay.focus-replay .replay-media-tools > button svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .precision-layout #view-replay.focus-replay .replay-media-tools #go-live[aria-pressed='true'] { color:var(--green); }
-.precision-layout #view-replay.focus-replay .replay-mode-switch { grid-column:2; grid-row:1; display:flex; align-items:center; flex:none; width:144px; min-height:var(--control); padding:0; border:1px solid var(--line); border-radius:var(--radius-pill); background:var(--fill-well); overflow:hidden; }
-.precision-layout #view-replay.focus-replay .replay-mode-switch > button { display:flex; align-items:center; justify-content:center; flex:1; gap:var(--space-1); height:var(--control); min-height:var(--control); min-width:0; padding:0 var(--space-2); border:0; border-radius:var(--radius-pill); background:transparent; color:var(--muted); font:14px var(--font); }
-.precision-layout #view-replay.focus-replay .replay-mode-switch > button[aria-pressed='true'] { color:var(--on-accent); background:var(--accent); font-weight:600; }
-.precision-layout #view-replay.focus-replay .replay-mode-switch svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; }
+.precision-layout #view-replay.focus-replay .timeline-window-switch { grid-column:2; grid-row:1; display:flex; align-items:center; flex:none; width:272px; min-height:var(--control); padding:0; border:1px solid var(--line); border-radius:var(--radius-pill); background:var(--fill-well); overflow:hidden; }
+.precision-layout #view-replay.focus-replay .timeline-window-switch > button { display:flex; align-items:center; justify-content:center; flex:1; height:var(--control); min-height:var(--control); min-width:var(--control); padding:0 var(--space-1); border:0; border-radius:var(--radius-pill); background:transparent; color:var(--muted); font:14px var(--font); white-space:nowrap; }
+.precision-layout #view-replay.focus-replay .timeline-window-switch > button[aria-pressed='true'] { color:var(--on-accent); background:var(--accent); font-weight:600; }
 .precision-layout #view-replay.focus-replay .precision-track-host { position:relative; grid-column:1/-1; grid-row:2; width:100%; height:48px; min-height:44px; min-width:0; margin:0; }
-.precision-layout #view-replay.focus-replay .precision-track-host .timeline-overview,
-.precision-layout #view-replay.focus-replay .precision-track-host .timeline { height:48px; border:0; border-radius:0; background:transparent; }
+.precision-layout #view-replay.focus-replay .precision-track-host .timeline-overview { height:48px; min-height:var(--control); border:0; border-radius:0; background:transparent; overflow:hidden; touch-action:pan-y; }
 .precision-layout #view-replay.focus-replay .precision-track-host .timeline-scroll { position:absolute; inset:0; margin:0; padding:0; }
 .precision-layout #view-replay.focus-replay .overview-scroll { display:block; height:100%; margin:0; padding:0; }
 .precision-layout #view-replay.focus-replay .overview-tick { top:24px; height:6px; }
@@ -1221,6 +1216,10 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay .overview-tick.major { top:16px; height:14px; }
 .precision-layout #view-replay.focus-replay .overview-tick small { bottom:12px; font-size:12px; }
 .precision-layout #view-replay.focus-replay .overview-segments { inset:32px 0 4px; border-radius:0; }
+.precision-layout #view-replay.focus-replay :is(.overview-segment,.overview-gap,.overview-outside) { position:absolute; top:0; height:100%; min-width:0; border:0; pointer-events:none; }
+.precision-layout #view-replay.focus-replay .overview-gap { background:var(--warning-tint); }
+.precision-layout #view-replay.focus-replay .overview-outside { background:var(--bg); }
+.precision-layout #view-replay.focus-replay .timeline-overview > .overview-outside { z-index:0; }
 .precision-layout #view-replay.focus-replay .overview-selection { top:30px; bottom:2px; border-color:var(--accent); background:var(--tint); }
 .precision-layout #view-replay.focus-replay .overview-cursor { top:14px; bottom:2px; }
 .precision-layout #view-replay.focus-replay .timeline-ruler { height:32px; }
@@ -1233,12 +1232,11 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay .timeline-section > :is(.notice-line,#retry-recordings) { grid-column:1/-1; grid-row:auto; max-width:100%; margin:0; }
 .precision-layout #view-replay.focus-replay .notice-line.error { font-size:13px; }
 .precision-layout #view-replay.focus-replay .replay-selection-editor { position:static; inset:auto; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-area:auto; align-items:center; width:100%; min-height:0; margin:0; padding:0; gap:var(--space-2); border:0; border-radius:0; background:transparent; box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; overflow:visible; }
-.precision-layout #view-replay.focus-replay[data-replay-mode='watch'] .replay-selection-editor { display:none; }
 .precision-layout #view-replay.focus-replay .mark-controls { position:static; inset:auto; display:grid; grid-column:1; grid-row:1; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:stretch; min-width:0; margin:0; gap:var(--space-2); }
 .precision-layout #view-replay.focus-replay .mark-field { display:flex; align-items:stretch; min-width:0; min-height:var(--control); border:1px solid var(--line); border-radius:var(--radius-field); background:var(--surface); overflow:hidden; }
 .precision-layout #view-replay.focus-replay .mark-field:has(.active) { border-color:var(--accent); background:var(--tint); }
 .precision-layout #view-replay.focus-replay .mark-field > button { display:flex; align-items:center; justify-content:center; min-height:var(--control); height:var(--control); margin:0; padding:var(--space-1); border:0; border-radius:0; background:transparent; color:var(--text); }
-.precision-layout #view-replay.focus-replay .mark-field > button:first-child { flex:none; flex-direction:column; gap:0; width:var(--control); min-width:var(--control); font:12px/1.2 var(--font); }
+.precision-layout #view-replay.focus-replay .mark-field > button:first-child { flex:none; flex-direction:column; gap:0; width:64px; min-width:64px; padding:0 var(--space-1); font:12px/1.2 var(--font); white-space:nowrap; }
 .precision-layout #view-replay.focus-replay .mark-field > button:first-child svg { flex:none; width:24px; height:24px; }
 .precision-layout #view-replay.focus-replay .mark-field > button:first-child.active { color:var(--accent); background:transparent; }
 .precision-layout #view-replay.focus-replay .mark-field > button:last-child { flex:1; width:auto; min-width:0; gap:var(--space-1); border-left:1px solid var(--line); font:16px var(--mono); font-variant-numeric:tabular-nums; }
@@ -1264,18 +1262,28 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 /* Portrait uses available shell height; video yields space before actions do. */
 @media (max-width:1023px) and (min-height:541px), (max-width:567px) {
   body.precision-layout[data-view='replay'] .views { padding:calc(max(var(--space-3),var(--safe-top)) + var(--status-bar-blur-gap)) max(var(--space-4),var(--safe-right)) calc(68px + var(--safe-bottom)) max(var(--space-4),var(--safe-left)); }
-  .precision-layout #view-replay.focus-replay .replay-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:var(--control) var(--control); gap:var(--space-1) var(--space-2); }
-  .precision-layout #view-replay.focus-replay .transport-buttons { grid-column:1/-1; grid-row:2; width:100%; grid-template-columns:repeat(3,minmax(var(--control),1fr)); }
-  .precision-layout #view-replay.focus-replay .transport-buttons > button { justify-self:center; }
-  .precision-layout #view-replay.focus-replay .timeline-time-editor { grid-column:1; grid-row:1; }
-  .precision-layout #view-replay.focus-replay .replay-media-tools { grid-column:2; grid-row:1; }
-  .precision-layout #view-replay.focus-replay .timeline-section { grid-template-columns:minmax(0,1fr); grid-template-rows:auto 48px auto; }
-  .precision-layout #view-replay.focus-replay .replay-mode-switch { grid-column:1; grid-row:3; width:100%; }
-  .precision-layout #view-replay.focus-replay .replay-mode-switch > button { font-size:15px; }
+  .precision-layout #view-replay.focus-replay .replay-toolbar { display:contents; }
+  .precision-layout #view-replay.focus-replay .transport-buttons { grid-column:1; grid-row:1; }
+  .precision-layout #view-replay.focus-replay .timeline-time-editor { grid-column:2; grid-row:1; justify-self:end; }
+  .precision-layout #view-replay.focus-replay .replay-media-tools { grid-column:1; grid-row:3; justify-self:start; margin-left:0; }
+  .precision-layout #view-replay.focus-replay .timeline-section { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:var(--control) 48px auto; }
+  .precision-layout #view-replay.focus-replay .timeline-window-switch { grid-column:2; grid-row:3; width:184px; }
+  .precision-layout #view-replay.focus-replay .timeline-window-switch > button { padding-inline:0; font-size:13px; }
   .precision-layout #view-replay.focus-replay .replay-selection-editor { grid-template-columns:minmax(0,1fr); }
   .precision-layout #view-replay.focus-replay .mark-controls { grid-column:1; grid-row:1; }
   .precision-layout #view-replay.focus-replay .replay-actions { grid-column:1; grid-row:2; }
   .precision-layout #view-replay.focus-replay .replay-actions > #export-range { min-width:112px; }
+}
+/* Very narrow screens give every media action and window its full hit area. */
+@media (max-width:374px) {
+  .precision-layout #view-replay.focus-replay .timeline-section { grid-template-rows:var(--control) var(--control) 48px auto; }
+  .precision-layout #view-replay.focus-replay .transport-buttons { grid-column:1/-1; grid-row:2; width:100%; grid-template-columns:repeat(3,minmax(var(--control),1fr)); }
+  .precision-layout #view-replay.focus-replay .transport-buttons > button { justify-self:center; }
+  .precision-layout #view-replay.focus-replay .timeline-time-editor { grid-column:1; grid-row:1; justify-self:start; }
+  .precision-layout #view-replay.focus-replay .replay-media-tools { grid-column:2; grid-row:1; }
+  .precision-layout #view-replay.focus-replay .precision-track-host { grid-row:3; }
+  .precision-layout #view-replay.focus-replay .timeline-window-switch { grid-column:1/-1; grid-row:4; width:100%; }
+  .precision-layout #view-replay.focus-replay .mark-field > button:first-child { width:56px; min-width:56px; }
 }
 @media (max-width:399px) {
   .precision-layout #view-replay.focus-replay .playback-quick-controls { grid-template-columns:minmax(0,1fr) minmax(64px,.6fr); gap:var(--space-1) var(--space-2); }
@@ -1330,9 +1338,9 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
   .precision-layout #view-replay.focus-replay[data-chrome-idle='true'] :is(.replay-topbar,.replay-control-panel) { opacity:0; pointer-events:none; }
   .precision-layout #view-replay.focus-replay :is(.replay-topbar,.replay-control-panel):has(:focus-visible) { opacity:1; pointer-events:auto; }
 }
-@media (orientation:landscape) and (min-width:568px) and (max-width:759px) {
+@media (orientation:landscape) and (max-height:540px) and (min-width:568px) and (max-width:859px) {
   .precision-layout #view-replay.focus-replay .timeline-section { grid-template-columns:minmax(0,1fr); }
-  .precision-layout #view-replay.focus-replay .replay-mode-switch { grid-column:1; grid-row:3; justify-self:end; }
+  .precision-layout #view-replay.focus-replay .timeline-window-switch { grid-column:1; grid-row:3; justify-self:end; }
   .precision-layout #view-replay.focus-replay .replay-selection-editor { grid-template-columns:minmax(0,1fr); }
   .precision-layout #view-replay.focus-replay .mark-controls { grid-column:1; grid-row:1; }
   .precision-layout #view-replay.focus-replay .replay-actions { grid-column:1; grid-row:2; }
