@@ -11,7 +11,7 @@ function harness() {
   const context = vm.createContext({ precisionTimeline: null, state, $, Math, document: { hidden: false }, requestAnimationFrame: fn => { frames.set(++frameId, fn); return frameId; }, cancelAnimationFrame: id => frames.delete(id), dateStart: () => 0, showScrubTime() {}, fadeScrubTime() {}, setPlaybackNotice() {}, updateCursor() { calls.cursor++; }, updateSelection() { calls.selection++; }, renderTimeline() { calls.renders++; }, jumpToTimelineTime: async (time, source, options = {}) => calls.preview.push({ time, source, autoplay: options.autoplay }) });
   vm.runInContext(script.slice(script.indexOf('function timelineWindow('), script.indexOf('function renderOverview(')), context);
   vm.runInContext(script.slice(script.indexOf('function setTimelineWindow('), script.indexOf('function renderTimeline(')), context);
-  vm.runInContext(script.slice(script.indexOf('function timeAtTimeline('), script.indexOf("$('timeline').addEventListener('pointerdown'")), context);
+  vm.runInContext(script.slice(script.indexOf('function timeAtTimeline('), script.indexOf('// The hidden compatibility timeline')), context);
   vm.runInContext(script.slice(script.indexOf('function scrubSnapshot('), script.indexOf('function jumpToTimelineTime(')), context);
   vm.runInContext(script.slice(script.indexOf('function focusBoundary('), script.indexOf('function openBoundaryEditor(')), context);
   return { state, context, calls, $, frames, frame(time) { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn(time)); } };
@@ -116,7 +116,7 @@ test('lost capture rolls back once and a later pointerup cannot commit the cance
   const lost = event(); lost.type = 'lostpointercapture'; lost.target = h.state.dragTarget; h.context.cancelTimelineScrub(lost);
   await h.context.endTimelineScrub(event({ x: 230 }), 'detail');
   assert.equal(h.state.cursorMs, original); assert.equal(h.state.dragging, false); assert.equal(h.calls.preview.length, 0);
-  assert.match(script, /'lostpointercapture', cancelTimelineScrub/);
+  assert.doesNotMatch(script, /'lostpointercapture', cancelTimelineScrub/);
 });
 test('three-second markers remain ordered while either handle crosses the other', async () => {
   const h = harness(); h.state.outMs = h.state.inMs + 3000; const originalOut = h.state.outMs;
@@ -270,7 +270,7 @@ test('page hiding and blur cancel active or pending gestures and never seek', ()
   h.context.beginTimelineScrub(event(), 'detail'); h.context.interruptTimelineScrub(); assert.equal(h.state.pendingScrub, null);
   assert.match(script, /visibilitychange.*document.hidden/); assert.match(script, /'blur', interruptTimelineScrub/);
 });
-test('timeline retains useful tick labels and precision input without zoom menu or duplicate help', async () => {
+test('timeline retains four explicit windows and precision input without duplicate help', async () => {
   const { statusDashboardPage } = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
   for (const id of ['timeline-start-label', 'timeline-middle-label', 'timeline-end-label', 'edit-in', 'edit-out']) assert.ok(html.includes(`id="${id}"`));
   for (const spanSeconds of [30, 300, 3600, 86400]) assert.ok(html.includes(`data-timeline-span="${spanSeconds}"`));

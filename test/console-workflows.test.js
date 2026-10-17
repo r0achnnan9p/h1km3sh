@@ -73,7 +73,7 @@ test('clear marks removes both endpoints and export overlay without changing pla
   const nodes = new Map(), $ = id => { if (!nodes.has(id)) nodes.set(id, new Node()); return nodes.get(id); };
   const state = { inMs: 100000, outMs: 200000, cursorMs: 150000, playBounds: { start: 90000, duration: 30 }, date: '2026-10-01', segments: [], playbackSource: 'mediamtx', busy: false, dragging: false, pendingScrub: null };
   let cancels = 0;
-  const c = vm.createContext({ formatClipDuration, $, state, dateStart: () => 0, boundaryLabel: String, updateBoundaryControls() {}, findCoverageGap: () => null, hasPlaybackSelection: () => true, timelineWindow: () => ({ start: 0, end: 86400000, span: 86400000 }), timelinePercent: () => 1, notify() {}, cancelTimelineScrub() { cancels++; } });
+  const c = vm.createContext({ formatClipDuration, $, state, dateStart: () => 0, boundaryLabel: String, updateBoundaryControls() {}, findCoverageGap: () => null, hasPlaybackSelection: () => true, timelineWindow: () => ({ start: 0, end: 86400000, span: 86400000 }), timelinePercent: () => 1, notify() {}, interruptTimelineScrub() { if (state.dragging) cancels++; state.dragging = false; state.pendingScrub = null; } });
   for (const id of ['range-overlay', 'overview-selection']) $(id).style = {};
   vm.runInContext(script.slice(script.indexOf('function clearMarkedRange('), script.indexOf("$('date-select').addEventListener('change'")), c);
   vm.runInContext(script.slice(script.indexOf('function updateSelection('), script.indexOf('function clearReplay(')), c);

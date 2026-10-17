@@ -388,8 +388,8 @@ test('date navigation is grouped with the date and the player keeps one ordered 
     assert.equal([...html.matchAll(new RegExp(`id="${id}"`, 'g'))].length, 1, id + ' must not be cloned for another viewport');
   }
   assert.match(html, /class="legacy-timeline-metadata" hidden inert>[\s\S]*?id="fine-back"[\s\S]*?id="fine-forward"/);
-  assert.match(script, /\$\('fine-back'\)\.addEventListener\('click', \(\) => stepReplay\(-1\)\)/);
-  assert.match(script, /\$\('fine-forward'\)\.addEventListener\('click', \(\) => stepReplay\(1\)\)/);
+  assert.doesNotMatch(script, /\$\('fine-back'\)\.addEventListener/);
+  assert.doesNotMatch(script, /\$\('fine-forward'\)\.addEventListener/);
 });
 
 test('icon day buttons change exactly one day across month boundaries and reject the future', () => {

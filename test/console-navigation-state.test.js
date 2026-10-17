@@ -225,7 +225,7 @@ test('desktop shortcuts share existing actions and honor local timeline handling
   for (const key of ['ArrowLeft','ArrowRight','KeyI','KeyO','KeyF','KeyM','Escape','Digit1','Digit2','Digit3','Digit4']) h.key(key);
   assert.deepEqual(h.steps, [-10,10]);
   assert.deepEqual(clicks, ['mark-in','mark-out','replay-fullscreen','playback-mute','clear-marks']);
-  assert.deepEqual(spans,[30,300,3600,86400]);
+  assert.deepEqual(spans,[86400,3600,300,30]);
   h.key('ArrowLeft',{defaultPrevented:true});h.key('KeyI',{repeat:true});assert.equal(h.steps.length,2);assert.equal(clicks.length,5);
   h.context.document.body.dataset.view='library';h.key('Slash');assert.equal(clicks.at(-1),'focus:output-search');
 });

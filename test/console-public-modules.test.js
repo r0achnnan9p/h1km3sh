@@ -24,7 +24,9 @@ test('public login page can load the complete actual console ES module graph wit
   await new Promise(resolve=>server.once('listening',resolve));
   const base=`http://127.0.0.1:${server.address().port}`;
   try {
-    const files=moduleGraph('console.js');assert.ok(files.has('precision-timeline.js'));assert.ok(files.has('precision-scrub.js'));
+    const files=moduleGraph('console.js');
+    assert.ok(files.has('precision-timeline.js'),'include the active ruler module');
+    assert.ok(files.has('mediamtx-reader.js'),'follow the transitive import from mediamtx-live-player.js');
     for(const file of files){const response=await fetch(`${base}/${file}`);assert.equal(response.status,200,file);assert.match(response.headers.get('content-type'),/javascript/);assert.equal(await response.text(),fs.readFileSync(path.join(publicRoot,file),'utf8'));}
     assert.equal((await fetch(base+'/console/api/bootstrap')).status,401);
     assert.notEqual((await fetch(base+'/app.js')).status,200);
