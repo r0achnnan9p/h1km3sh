@@ -692,7 +692,7 @@ function syncPlaybackStatus() {
   else if (failed) text = live ? '连接失败' : '回放失败';
   else if (video.ended) text = live ? '直播已结束' : '本段结束';
   else if (state.playbackWaiting || video.readyState < 2 || video.currentSrc !== video.src) text = live ? '连接中' : '载入中';
-  else if (state.previewMode === 'last-frame') text = '今日最后录像画面';
+  else if (state.previewMode === 'last-frame') text = state.date === today() ? '今日最后录像画面' : '所选日期最后录像画面';
   else if (video.paused) text = live ? '直播已暂停' : '回放已暂停';
   else text = live ? '直播中' : state.playBounds?.sdkTimingUnknown ? '回放 · 以画面为准' : '回放中';
   label.setAttribute('aria-live', live || state.playBounds?.sdkTimingUnknown ? 'polite' : 'off');
@@ -759,23 +759,27 @@ function startLive() {
   });
 }
 async function showLastRecordingFrame(requestId, camera) {
-  const date = today();
-  setPlaybackNotice('直播暂不可用，正在读取今天最后的录像画面…');
+  const date = state.date;
+  if (!date) return;
+  const dayLabel = date === today() ? '今天' : '所选日期';
+  setPlaybackNotice(`直播暂不可用，正在读取${dayLabel}最后的录像画面…`);
   const data = await api(`/console/api/playback/${encodeURIComponent(camera)}/segments?${new URLSearchParams({ date })}`);
-  if (requestId !== state.playRequestId || state.playbackSource !== 'mediamtx' || camera !== state.selectedCamera) return;
+  if (requestId !== state.playRequestId || state.playbackSource !== 'mediamtx' || camera !== state.selectedCamera || date !== state.date) return;
   const day = dateStart(date), now = Date.now();
   const segments = (data.segments || []).filter(row => { const b = segmentBounds(row); return Number.isFinite(b.start) && Number.isFinite(b.end) && b.start < Math.min(now, day + 86400000) && b.end > day; }).sort((a,b) => segmentBounds(a).end - segmentBounds(b).end);
   const last = segments.at(-1);
-  if (!last) { clearReplay(); setPlaybackNotice('当前没有直播，今天也没有可用录像画面。'); return; }
+  if (!last) { clearReplay(); setPlaybackNotice(`当前没有直播，${dayLabel}也没有可用录像画面。`); return; }
   const bounds = segmentBounds(last), end = Math.min(bounds.end, now, day + 86400000), start = Math.max(bounds.start, day, end - 10000);
-  if (end <= start) { clearReplay(); setPlaybackNotice('今天还没有可用录像画面。'); return; }
+  if (end <= start) { clearReplay(); setPlaybackNotice(`${dayLabel}还没有可用录像画面。`); return; }
   state.segmentRequestId++; state.segments = segments;
-  if (state.date !== date) clearMarkedRange();
-  state.date = date; $('date-select').value = date; updatePlaybackContext();
-  await playAt(start, { autoplay: false, segmentOverride: last });
+  // A live-preview fallback must not replace the selected day or export marks.
+  const preview = playAt(start, { autoplay: false, segmentOverride: last });
+  const previewRequestId = state.playRequestId;
+  await preview;
+  if (previewRequestId !== state.playRequestId || state.playbackSource !== 'mediamtx' || camera !== state.selectedCamera || date !== state.date) return;
   state.previewMode = 'last-frame';
-  state.lastFramePending = { requestId: state.playRequestId, end, seeking: false };
-  setPlaybackNotice('直播暂不可用，正在定位今天最后的录像画面…'); syncReplayToggle();
+  state.lastFramePending = { requestId: previewRequestId, end, seeking: false };
+  setPlaybackNotice(`直播暂不可用，正在定位${dayLabel}最后的录像画面…`); syncReplayToggle();
 }
 function finishLastRecordingFrame() {
   const pending = state.lastFramePending, video = $('replay-player'), bounds = state.playBounds;
@@ -793,7 +797,7 @@ function finishLastRecordingFrame() {
   video.pause(); state.followPlayback = false; state.playbackAutoplay = false;
   state.cursorMs = bounds.start + video.currentTime * 1000; state.lastFramePending = null;
   setTimelineWindow(state.cursorMs); syncReplayToggle();
-  setPlaybackNotice(`直播暂不可用 · 今日最后录像画面 ${wallTime(state.cursorMs)}`);
+  setPlaybackNotice(`直播暂不可用 · ${state.date === today() ? '今日' : '所选日期'}最后录像画面 ${wallTime(state.cursorMs)}`);
 }
 function startDvrLive() {
   if (state.playbackSource !== 'dvr' || !hasPlaybackSelection()) return;
