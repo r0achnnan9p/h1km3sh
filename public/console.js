@@ -49,7 +49,9 @@ const TIMELINE_SPANS = [86400, 3600, 300, 30];
 const DEFAULT_TIMELINE_SPAN_SECONDS = 86400;
 const APP_BASE_PATH = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const appPath = value => `${APP_BASE_PATH}${value.startsWith('/') ? value : `/${value}`}`;
-const state = { cameras: [], dvrs: [], segments: [], outputs: [], tasks: [], uploads: [], outputSort: 'newest', selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', previewMode: 'replay', date: '', cursorMs: null, inMs: null, outMs: null, timelineSpanSeconds: DEFAULT_TIMELINE_SPAN_SECONDS, timelineStartMs: null, dragging: false, dragSource: '', dragPointerId: null, playRequestId: 0, segmentRequestId: 0, dvrChannelRequestId: 0, playbackAutoplay: false, playbackFormats: [], playFormat: '', playBounds: null, followPlayback: false, scrubFadeTimer: null, busy: false, source: null, lastTasks: '' };
+// Task telemetry timestamps are server time. Keep the offset so a skewed
+// device clock cannot hide a fresh transfer rate.
+const state = { cameras: [], dvrs: [], segments: [], outputs: [], tasks: [], uploads: [], serverClockOffset: 0, outputSort: 'newest', selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', previewMode: 'replay', date: '', cursorMs: null, inMs: null, outMs: null, timelineSpanSeconds: DEFAULT_TIMELINE_SPAN_SECONDS, timelineStartMs: null, dragging: false, dragSource: '', dragPointerId: null, playRequestId: 0, segmentRequestId: 0, dvrChannelRequestId: 0, playbackAutoplay: false, playbackFormats: [], playFormat: '', playBounds: null, followPlayback: false, scrubFadeTimer: null, busy: false, source: null, lastTasks: '' };
 const shanghai = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' });
 const dateParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
 let toastTimer, clockTimer;
@@ -168,6 +170,7 @@ async function start(bootstrap = null) {
     }
     $('boot-view').hidden = true; $('auth-view').hidden = true; $('console-shell').hidden = false; $('mobile-nav').hidden = false; $('logout').hidden = false;
     setConnection('服务在线');
+    const serverTime = Date.parse(bootstrap.generatedAt); if (Number.isFinite(serverTime)) state.serverClockOffset = serverTime - Date.now();
     state.configRevision = bootstrap.configRevision || null;
     fillDvrDevices(bootstrap.dvrs || []);
     fillCameras(bootstrap.cameras || []);
@@ -2047,7 +2050,7 @@ function appendTransferPresentation(card, task, upload) {
   card.classList.toggle('task-working', running); card.classList.toggle('task-verification', upload && ['unknown', 'needs-confirmation'].includes(task.status) && !task.archivedAt);
   if (upload) { const target = document.createElement('span'); target.className = 'task-target'; target.innerHTML = iconSvg(task.provider === 'bilibili' ? 'tv' : 'cloud'); target.append(document.createTextNode(task.provider === 'bilibili' ? 'B站' : '189')); card.querySelector('.task-footer').prepend(target); }
   if (!running) return;
-  const progress = taskProgressPresentation(task), sample = transferSampler.sample(task);
+  const progress = taskProgressPresentation(task), sample = transferSampler.sample(task, Date.now() + (state.serverClockOffset || 0));
   const stats = document.createElement('div'); stats.className = 'task-transfer-stats mono';
   const size = document.createElement('span'); size.textContent = sample.bytes == null ? '已传大小待测' : (task.transferScope === 'file' ? '当前文件 ' : '') + formatTransferBytes(sample.bytes) + (sample.total == null ? '' : ' / ' + formatTransferBytes(sample.total));
   const percent = document.createElement('strong'); percent.className = 'task-percent'; percent.textContent = progress.hasPercent ? Math.round(progress.percent) + '%' : '—'; stats.append(size, percent);
@@ -2160,6 +2163,7 @@ async function refreshState() {
   const session = consoleSession, request = ++stateRequest, outputVersion = ++outputRequest;
   const data = await api('/console/api/bootstrap');
   if (session !== consoleSession) return;
+  const serverTime = Date.parse(data.generatedAt); if (Number.isFinite(serverTime)) state.serverClockOffset = serverTime - Date.now();
   if (outputVersion === outputRequest) acceptOutputs(data.outputs);
   if (request !== stateRequest) return;
   reconcileDvrHttpSamplePending();
@@ -2174,6 +2178,7 @@ function connectEvents() {
     if (source !== state.source) return;
     stateRequest++;
     const data = JSON.parse(event.data), before = state.lastTasks;
+    const serverTime = Date.parse(data.generatedAt); if (Number.isFinite(serverTime)) state.serverClockOffset = serverTime - Date.now();
     reconcileDvrHttpSamplePending();
     state.activeTaskCount = data.activeTaskCount; state.exportActiveTaskCount = data.exportActiveTaskCount; state.uploadActiveTaskCount = data.uploadActiveTaskCount; state.tasks = data.tasks || []; state.uploads = data.uploads || []; renderTasks(); renderSettings(data.settings || {}, data.integrations || {}); setConnection('实时同步');
     const snapshot = JSON.stringify([state.tasks.map(task => [task.taskId, task.status]), state.uploads.map(task => [task.id, task.status, task.progress])]);

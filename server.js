@@ -1223,7 +1223,7 @@ function consoleCameras() {
 }
 function consoleBootstrap() {
   const dashboard = getDashboardStatus();
-  return { success: true, configRevision: configSnapshot().revision, passwordManaged: statusPasswordStore.isManaged(), cameras: consoleCameras(), dvrs: consoleDvrDevices(), outputs: consoleOutputs(), uploads: consoleUploadJobs(),
+  return { success: true, generatedAt: dashboard.generatedAt, configRevision: configSnapshot().revision, passwordManaged: statusPasswordStore.isManaged(), cameras: consoleCameras(), dvrs: consoleDvrDevices(), outputs: consoleOutputs(), uploads: consoleUploadJobs(),
     tasks: dashboard.tasks, activeTaskCount: dashboard.activeTaskCount, exportActiveTaskCount: dashboard.exportActiveTaskCount, uploadActiveTaskCount: dashboard.uploadActiveTaskCount, settings: readConsoleSettings(), integrations: consoleIntegrations() };
 }
 const dvrHttpSamplePrivateRoot = path.join(path.dirname(getDataFilePath()), 'dvr-http-sample-private');

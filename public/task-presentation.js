@@ -96,7 +96,13 @@ export function createTransferSampler({ windowMs = 5000 } = {}) {
       if (!record || record.attempt !== attempt || timestamp < record.last || (bytes != null && record.bytes != null && bytes < record.bytes)) {
         record = { attempt, points: [], last: 0, bytes: null, bps: null, history: [] }; tasks.set(id, record);
       }
-      const transfer = ['downloading', 'uploading'].includes(task.status) && !['cache', 'preparing', 'submitting'].includes(task.stage);
+      // MediaMTX local cuts report a live ffmpeg byte rate while the task is
+      // already 'converting'. DVR trimming also uses 'converting' but has no
+      // rate, so it must keep the unknown state instead of claiming 0 bps.
+      const rate = task.speed ?? task.uploadSpeed;
+      const backendRate = Number.isFinite(rate) ? rate : null;
+      const transfer = (['downloading', 'uploading'].includes(task.status) || (task.status === 'converting' && backendRate > 0))
+        && !['cache', 'preparing', 'submitting'].includes(task.stage);
       if (transfer && timestamp > record.last && timestamp <= now + 1000) {
         if (bytes != null && !fileScoped) {
           record.points.push({ t: timestamp, bytes });
@@ -109,8 +115,7 @@ export function createTransferSampler({ windowMs = 5000 } = {}) {
         } else {
           // File resets can fall between SSE snapshots; the backend already resets per file.
           // Existing backend rates are already smoothed; never apply another window.
-          const rate = task.speed ?? task.uploadSpeed;
-          record.bps = Number.isFinite(rate) && rate >= 0 ? rate * 8 : null;
+          record.bps = backendRate != null && backendRate >= 0 ? backendRate * 8 : null;
         }
         if (record.bps != null) { record.history.push(record.bps); record.history = record.history.slice(-12); }
         record.last = timestamp; record.bytes = bytes;

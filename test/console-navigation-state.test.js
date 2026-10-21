@@ -98,7 +98,8 @@ test('a new login/bootstrap records the playback source revision and stale recor
     loadCache: async () => {}, connectEvents() {}, loadSegments: async () => {}, navigate() {}, clock() {}, location: { hash: '#replay' },
   });
   vm.runInContext(script.slice(script.indexOf('async function start('), script.indexOf('function clock(')), h.context);
-  await h.context.start({ ...sourceSnapshot(), configRevision: 'r2' });
+  await h.context.start({ ...sourceSnapshot(), configRevision: 'r2', generatedAt: new Date(Date.now() - 3_600_000).toISOString() });
+  assert.ok(h.state.serverClockOffset < -3_500_000 && h.state.serverClockOffset > -3_700_000, 'start aligns the browser clock to the bootstrap snapshot');
   assert.equal(h.state.configRevision, 'r2');
   h.context.acceptConsoleConfig({ ...sourceSnapshot(), revision: 'r2' });
   assert.equal(h.resets(), 0);
