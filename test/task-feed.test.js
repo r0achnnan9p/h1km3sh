@@ -94,6 +94,16 @@ test('file-scoped counters reuse reset backend rate when SSE misses the zero cou
  Object.assign(task,{transferredBytes:10000000,speed:10000000,speedUpdatedAt:now+1600,progressUpdatedAt:now+1600});
  assert.equal(sampler.sample(task,now+1600).bps,80000000);
 });
+test('MediaMTX converting reports its live backend rate while DVR trimming stays unknown',()=>{
+ const sampler=createTransferSampler(),now=1800000000000;
+ const media={id:'media-cut',status:'converting',speed:5e6,speedUpdatedAt:now,progressUpdatedAt:now};
+ assert.equal(sampler.sample(media,now).bps,4e7);
+ assert.equal(sampler.sample(media,now+7000).bps,null,'stale rate ages out like any other transfer');
+ const trim={id:'dvr-trim',status:'converting',progressUpdatedAt:now};
+ assert.equal(sampler.sample(trim,now).bps,null);
+ const zero={id:'media-zero',status:'converting',speed:0,speedUpdatedAt:now};
+ assert.equal(sampler.sample(zero,now).bps,null,'zero is not evidence of an active cut');
+});
 test('archiving visible unknown tasks skips closed details anchors without expanding loaded history',()=>{
  const doc={createElement:tag=>Object.assign(new LayoutElement(),{tag}),activeElement:null},list=new LayoutElement(),scroller=new LayoutElement(),sentinel=new LayoutElement();scroller.isScroller=true;list.scroller=scroller;scroller.clientHeight=300;Object.defineProperty(scroller,'scrollHeight',{get:()=>list.children.reduce((sum,e)=>sum+e.height,0)});
  const feed=createTaskFeed({list,scroller,sentinel,document:doc,createdAt:t=>t.createdAt,makeCard:t=>{const e=new LayoutElement();e.textContent=t.id;return e;}});

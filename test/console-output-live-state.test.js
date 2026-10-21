@@ -7,16 +7,17 @@ function harness() {
   const callbacks = new Map(), accepted = []; let refreshes = 0;
   const context = vm.createContext({
     state: { tasks: [], uploads: [], lastTasks: '' }, outputRequest: 0, stateRequest: 0, consoleSession: 0,
-    api: async () => ({ tasks: [], uploads: [{ id: 'u', status: 'queued' }], outputs: [{ id: 'f', uploads: { bilibili: { status: 'queued' } } }] }),
+    api: async () => ({ generatedAt: new Date(Date.now() - 3_600_000).toISOString(), tasks: [], uploads: [{ id: 'u', status: 'queued' }], outputs: [{ id: 'f', uploads: { bilibili: { status: 'queued' } } }] }),
     acceptOutputs: data => accepted.push(data), refreshOutputs: async () => { refreshes++; },
     reconcileDvrHttpSamplePending() {}, renderTasks() {}, renderSettings() {}, setConnection() {}, loggedOut() {}, appPath: value => value,
     EventSource: class { addEventListener(name, fn) { callbacks.set(name, fn); } close() {} },
   });
   vm.runInContext(code.slice(code.indexOf('async function refreshState()'), code.indexOf('// Configuration is fetched separately')),context);
-  return { context, accepted, count: () => refreshes, update: uploads => callbacks.get('update')({ data: JSON.stringify({ tasks: [], uploads }) }) };
+  return { context, accepted, count: () => refreshes, update: (uploads, generatedAt) => callbacks.get('update')({ data: JSON.stringify({ generatedAt, tasks: [], uploads }) }) };
 }
 test('bootstrap直接接收成片事实，首次上传无需历史 completed 才同步',async()=>{
  const h=harness();await h.context.refreshState();assert.equal(h.accepted[0][0].uploads.bilibili.status,'queued');
+ assert.ok(h.context.state.serverClockOffset < -3_500_000 && h.context.state.serverClockOffset > -3_700_000,'bootstrap aligns the browser clock to the server snapshot');
  h.context.connectEvents();
  for(const status of ['queued','uploading','failed','unknown']) h.update([{id:'u',status}]);
  assert.equal(h.count(),3,'queued与bootstrap相同，其余三个状态都会刷新');
@@ -25,6 +26,12 @@ test('同一上传状态的真实进度变化刷新，重复SSE不重复刷新',
  const h=harness();h.context.connectEvents();
  h.update([{id:'u',status:'uploading',progress:1}]); h.update([{id:'u',status:'uploading',progress:2}]); h.update([{id:'u',status:'uploading',progress:2}]);
  assert.equal(h.count(),2);
+});
+test('SSE snapshot aligns the browser clock without touching task data',()=>{
+ const h=harness();h.context.connectEvents();
+ h.update([{id:'u',status:'uploading'}], new Date(Date.now() - 7_200_000).toISOString());
+ assert.ok(h.context.state.serverClockOffset < -7_100_000 && h.context.state.serverClockOffset > -7_300_000,'SSE aligns the browser clock to its snapshot time');
+ assert.equal(h.context.state.uploads[0].id,'u');
 });
 
 
