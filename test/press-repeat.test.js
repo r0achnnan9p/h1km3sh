@@ -241,6 +241,7 @@ function keyHarness(options = {}) {
   const binding = bindKeyRepeat(document, {
     resolve: event => event.code === 'Comma' ? -10 : event.code === 'Period' ? 10 : null,
     canStart: () => options.allowed !== false,
+    canContinue: () => options.blocked !== true,
     onStart: action => { calls.starts.push(action); return context; },
     onRepeat: (value, action) => { value.steps += action; calls.repeats.push(action); },
     onCommit: (value, action) => calls.commits.push([action, value.steps]),
@@ -248,7 +249,7 @@ function keyHarness(options = {}) {
     ...options,
   });
   const event = (code, properties = {}) => ({ code, key: code, target: {}, ...properties });
-  return { timers, document, window, calls, context, binding,
+  return { timers, document, window, calls, context, binding, options,
     down: (code = 'Comma', properties) => document.emit('keydown', event(code, properties)),
     up: (code = 'Comma', properties) => document.emit('keyup', event(code, properties)),
   };
@@ -291,4 +292,32 @@ test('keyboard repeat callback failures release ownership and leave no timer beh
   assert.throws(() => h.down(), /key repeat failed/);
   assert.deepEqual(h.calls.cancels, [{ action: -10, reason: 'callback-error' }]);
   assert.equal(h.timers.pending, 0);
+});
+
+test('focus in a text field, IME composition or a blocked dialog abandons a held shortcut before keyup', () => {
+  const focused = keyHarness(); focused.down();
+  focused.document.emit('focusin', { target: { matches: selector => selector.includes('input') } });
+  assert.deepEqual(focused.calls.cancels, [{ action: -10, reason: 'focus' }]);
+  assert.equal(focused.timers.pending, 0);
+  focused.up(); assert.deepEqual(focused.calls.commits, []);
+
+  const composing = keyHarness(); composing.down('Period');
+  composing.document.emit('compositionstart', { target: {} });
+  assert.deepEqual(composing.calls.cancels, [{ action: 10, reason: 'composition' }]);
+  composing.up('Period'); assert.deepEqual(composing.calls.commits, []);
+
+  const dialog = keyHarness(); dialog.down(); dialog.options.blocked = true;
+  dialog.document.emit('focusin', { target: { matches: () => false } });
+  assert.deepEqual(dialog.calls.cancels, [{ action: -10, reason: 'blocked' }]);
+  dialog.up(); assert.deepEqual(dialog.calls.commits, []);
+
+  const tick = keyHarness(); tick.down(); tick.options.blocked = true;
+  tick.timers.advance(350);
+  assert.deepEqual(tick.calls.cancels, [{ action: -10, reason: 'blocked' }]);
+  assert.deepEqual(tick.calls.repeats, [-10]); assert.equal(tick.timers.pending, 0);
+  tick.up(); assert.deepEqual(tick.calls.commits, []);
+
+  const released = keyHarness(); released.down(); released.options.blocked = true; released.up();
+  assert.deepEqual(released.calls.cancels, [{ action: -10, reason: 'blocked' }]);
+  assert.deepEqual(released.calls.commits, []);
 });

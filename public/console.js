@@ -1361,6 +1361,7 @@ const replayStepKeys = bindKeyRepeat(document, {
     if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
     return document.body.dataset.view === 'replay';
   },
+  canContinue: () => !activeDialog?.open && document.body.dataset.view === 'replay',
   onStart: beginReplayHold,
   onRepeat: repeatReplayHold,
   onCommit: commitReplayHold,

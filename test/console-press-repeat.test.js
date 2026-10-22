@@ -329,3 +329,19 @@ test('a changed source cancels the keyboard hold before its release can seek', (
   h.timers.advance(1000);
   assert.equal(h.calls.previews.length, 0); assert.equal(h.calls.seeks.length, 0); assert.equal(h.state.holdSeek, null);
 });
+
+test('opening the range editor cancels a held shortcut so its release cannot seek the stale cursor', () => {
+  const h = harness();
+  h.document.emit('keydown', { code: 'Period', key: 'Period', target: {}, preventDefault() {} });
+  h.timers.advance(180);
+  assert.equal(h.state.cursorMs, h.base + 20000);
+  // openRangeEditor sets activeDialog before focusing the 入点 field.
+  h.context.activeDialog = { open: true };
+  h.document.emit('focusin', { target: { matches: selector => selector.includes('input') } });
+  assert.equal(h.state.cursorMs, h.base + 10000);
+  h.timers.advance(1000);
+  h.document.emit('keyup', { code: 'Period', key: 'Period', target: {} });
+  h.timers.advance(1000);
+  assert.equal(h.state.cursorMs, h.base + 10000); assert.equal(h.calls.previews.length, 0);
+  assert.equal(h.state.holdSeek, null); assert.equal(h.timers.pending, 0);
+});

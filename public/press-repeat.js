@@ -136,10 +136,14 @@ export function bindPressRepeat(button, {
  * The first keydown starts and applies one step immediately, native key repeat
  * is ignored, then the action repeats after `delay` every `interval`. Keyup
  * commits once; a different key's keyup cannot settle the active gesture.
+ * `canContinue` is re-checked before every repeat and on release, so a hold
+ * cannot keep moving the timeline after focus enters an input, a dialog opens
+ * or the view changes. Focus in a text field and IME composition cancel too.
  */
 export function bindKeyRepeat(document, {
   resolve,
   canStart = () => true,
+  canContinue = () => true,
   onStart = () => undefined,
   onRepeat = () => {},
   onCommit = () => {},
@@ -159,6 +163,8 @@ export function bindKeyRepeat(document, {
   let active = null, destroyed = false;
 
   const unavailable = () => document.hidden === true;
+  const continues = () => !unavailable() && canContinue() !== false;
+  const entersText = target => Boolean(target?.isContentEditable || target?.matches?.('input, textarea, select'));
   function listen(target, name, listener, options) {
     if (!target?.addEventListener) return;
     target.addEventListener(name, listener, options);
@@ -182,6 +188,7 @@ export function bindKeyRepeat(document, {
     if (active !== current || destroyed) return;
     current.timer = null;
     if (unavailable()) { cancel('unavailable'); return; }
+    if (canContinue() === false) { cancel('blocked'); return; }
     try { onRepeat(current.context, current.action); }
     catch (error) {
       if (active === current) cancel('callback-error');
@@ -197,14 +204,20 @@ export function bindKeyRepeat(document, {
     if (destroyed) return;
     const action = resolve(event);
     if (action === null || action === undefined || action === false) return;
+    if (active) {
+      // A dialog, focus change or view switch may land between repeat ticks.
+      if (!continues()) { cancel('blocked'); return; }
+      if (event.repeat) event.preventDefault?.();
+      return;
+    }
     // Native repeat would bypass the local hold and issue extra seeks. Only
     // swallow it when this binding owns the gesture, so holding a comma inside
     // a text field still types normally.
     if (event.repeat) {
-      if (active || canStart(event)) event.preventDefault?.();
+      if (canStart(event)) event.preventDefault?.();
       return;
     }
-    if (active || unavailable() || !canStart(event)) return;
+    if (!continues() || !canStart(event)) return;
     event.preventDefault?.();
     const current = { action, code: event.code ?? null, key: event.key ?? null, context: undefined, timer: null };
     active = current;
@@ -219,10 +232,18 @@ export function bindKeyRepeat(document, {
   }
   function keyup(event) {
     if (!active || !matchesKey(event, active)) return;
+    // Releasing after focus or a dialog change must not seek the old target.
+    if (!continues()) { cancel('blocked'); return; }
     finish(true);
   }
   listen(document, 'keydown', keydown);
   listen(document, 'keyup', keyup);
+  listen(document, 'focusin', event => {
+    if (!active) return;
+    if (entersText(event.target)) cancel('focus');
+    else if (!continues()) cancel('blocked');
+  }, true);
+  listen(document, 'compositionstart', () => cancel('composition'), true);
   listen(window, 'blur', () => cancel('blur'));
   listen(document, 'visibilitychange', () => { if (document.hidden === true) cancel('hidden'); });
 

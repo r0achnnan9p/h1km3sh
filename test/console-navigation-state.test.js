@@ -192,9 +192,11 @@ function keyboardHarness(view) {
   const down = (code, extras) => emit('keydown', code, extras);
   const up = (code, extras) => emit('keyup', code, extras);
   const key = (code, extras = {}) => { down(code, extras); up(code, extras); };
-  return { context, steps, commits, cancels, HTMLElement, timers,
+  return { context, steps, commits, cancels, HTMLElement, timers, document,
     key, down, up,
     toggles: () => toggles, prevented: () => prevented,
+    focus: target => emit('focusin', '', { target }),
+    compose: () => emit('compositionstart', '', { target: {} }),
     blur: () => { for (const handler of windowHandlers.get('blur') || []) handler({}); },
     hide: () => { document.hidden = true; for (const handler of handlers.get('visibilitychange') || []) handler({}); },
   };
@@ -257,6 +259,19 @@ test('a different step key release cannot commit an active hold, while blur or h
   assert.equal(blurred.cancels.length, 1); blurred.up('Comma'); assert.deepEqual(blurred.commits, []);
   const hidden = keyboardHarness('replay'); hidden.down('Period'); hidden.hide();
   assert.equal(hidden.cancels.length, 1); hidden.up('Period'); assert.deepEqual(hidden.commits, []);
+});
+test('opening a dialog, focusing an editor or starting IME composition cancels a held step before release', () => {
+  const dialog = keyboardHarness('replay'); dialog.down('Comma');
+  dialog.context.activeDialog = { open: true }; dialog.focus(new dialog.HTMLElement('h2'));
+  assert.equal(dialog.cancels.length, 1); dialog.timers.advance(1000); assert.deepEqual(dialog.steps, [-10]);
+  dialog.up('Comma'); assert.deepEqual(dialog.commits, []);
+
+  const focused = keyboardHarness('replay'); focused.down('Period');
+  focused.focus(new focused.HTMLElement('input'));
+  assert.equal(focused.cancels.length, 1); focused.up('Period'); assert.deepEqual(focused.commits, []);
+
+  const composing = keyboardHarness('replay'); composing.down('Comma'); composing.compose();
+  assert.equal(composing.cancels.length, 1); composing.up('Comma'); assert.deepEqual(composing.commits, []);
 });
 test('all text entry controls, contenteditable, dialogs and composition retain native keyboard behavior', () => {
   const h = keyboardHarness('replay');
