@@ -1,0 +1,6 @@
+# Use LF in all text files on every platform.
+* text=auto eol=lf
+
+# Never normalize binary assets.
+*.png binary
+*.woff2 binary
