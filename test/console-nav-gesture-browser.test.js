@@ -162,9 +162,10 @@ async function drag(b, starts, dx, dy, { steps = 12 } = {}) {
 }
 const tap = async (b, point) => { await touch(b, 'touchStart', [point]); await sleep(40); await touch(b, 'touchEnd', []); await sleep(200); };
 const scrollY = b => b.evaluate('Math.round(window.scrollY)');
-const contentScrollY = b => b.evaluate("Math.round(document.querySelector('.workspace-main').scrollTop)");
+const scrollContainer = `document.querySelector(document.body?.dataset.view === 'replay' ? '#view-replay' : '.workspace-main')`;
+const contentScrollY = b => b.evaluate(`Math.round(${scrollContainer}.scrollTop)`);
 const center = (b, selector) => b.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-const navState = b => b.evaluate(`({ clicks: __nav.clicks, view: document.querySelector('.mobile-nav button.active')?.dataset.view, scrollY: Math.round(scrollY), contentY: Math.round(document.querySelector('.workspace-main').scrollTop) })`);
+const navState = b => b.evaluate(`({ clicks: __nav.clicks, view: document.querySelector('.mobile-nav button.active')?.dataset.view, scrollY: Math.round(scrollY), contentY: Math.round(${scrollContainer}.scrollTop) })`);
 // 导航起点的拖动：逐次保存拖动前的 click 数与激活视图，拖动后断言没有误点击、没有切换、背景没滚。
 async function navDrag(b, label, starts, dx, dy, options) {
   const before = await navState(b);
@@ -176,13 +177,13 @@ async function navDrag(b, label, starts, dx, dy, options) {
   assert.equal(after.contentY, before.contentY, `${label}：导航不能带动内容滚动`);
 }
 
-async function setup(t, { forceAuto = false } = {}) {
+async function setup(t, { forceAuto = false, scrollable = false } = {}) {
   const res = createResources();
   t.after(() => res.closeAll()); // 先登记，之后任一步 await 失败也会清理已取得的资源
   const server = await startFixture(res);
   const b = await launch(res);
   await b.send('Page.enable'); await b.send('Runtime.enable');
-  await b.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 520, deviceScaleFactor: 2, mobile: true });
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 390, height: scrollable ? 390 : 520, deviceScaleFactor: 2, mobile: true });
   await b.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal#replay` });
   let ready = false;
@@ -191,23 +192,25 @@ async function setup(t, { forceAuto = false } = {}) {
   await sleep(600);
   if (forceAuto) await b.evaluate(`(() => { const s = document.createElement('style'); s.textContent = '.mobile-nav, .mobile-nav * { touch-action: auto !important; }'; document.head.append(s); })()`);
   await b.evaluate(`window.__nav = { cancel: 0, up: 0, clicks: 0 }; const nav = document.querySelector('.mobile-nav'); nav.addEventListener('pointercancel', () => __nav.cancel++); nav.addEventListener('pointerup', () => __nav.up++); nav.addEventListener('click', () => __nav.clicks++);`);
-  const metrics = await b.evaluate(`({ scrollHeight: document.querySelector('.workspace-main').scrollHeight, inner: document.querySelector('.workspace-main').clientHeight, nav: getComputedStyle(document.querySelector('.mobile-nav')).display })`);
+  const metrics = await b.evaluate(`({ scrollHeight: ${scrollContainer}.scrollHeight, inner: ${scrollContainer}.clientHeight, nav: getComputedStyle(document.querySelector('.mobile-nav')).display })`);
   assert.equal(metrics.nav, 'grid', '窄屏下必须显示底部导航');
-  assert.ok(metrics.scrollHeight > metrics.inner + 80, `前置条件：页面必须可滚动才能测试背景 pan（scrollHeight=${metrics.scrollHeight}, inner=${metrics.inner}）`);
+  if (scrollable) assert.ok(metrics.scrollHeight > metrics.inner + 80, `前置条件：页面必须可滚动才能测试背景 pan（scrollHeight=${metrics.scrollHeight}, inner=${metrics.inner}）`);
   return b;
 }
+// 从当前可见正文的留白处起手，不能使用短屏下已落入底栏的固定坐标。
+const contentPoint = b => b.evaluate(`(() => { const r = ${scrollContainer}.getBoundingClientRect(); const nav = document.querySelector('.mobile-nav').getBoundingClientRect(); return { x: r.left + 4, y: Math.min(r.bottom, nav.top) - 20 }; })()`);
 const navButton = view => `.mobile-nav button[data-view="${view}"]`;
 const activeView = b => b.evaluate(`document.querySelector('.mobile-nav button.active')?.dataset.view`);
 
 test('对照：内容区起点的触摸拖动仍然滚动页面', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
-  const b = await setup(t);
-  await drag(b, [{ x: 195, y: 330 }], 0, -200);
+  const b = await setup(t, { scrollable: true });
+  await drag(b, [await contentPoint(b)], 0, -200);
   assert.ok(await contentScrollY(b) > 40, '内容区拖动应带动页面滚动');
   assert.equal(await scrollY(b), 0, '根页面不能跟随内容拖动');
 });
 
 test('从导航起点的拖动不滚动背景、不误点击：短拖、长距离、下拉、拖出按钮后松手、双指', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
-  const b = await setup(t);
+  const b = await setup(t, { scrollable: true });
   const nav = await center(b, navButton('library'));
   const other = await center(b, navButton('settings'));
   await navDrag(b, '短拖', [nav], 0, -150);
@@ -215,7 +218,7 @@ test('从导航起点的拖动不滚动背景、不误点击：短拖、长距�
   await navDrag(b, '向下拖动', [nav], 0, 200);
   await navDrag(b, '拖出按钮后松手', [nav], 0, -300);
   await navDrag(b, '双指', [nav, other], 0, -250);
-  await drag(b, [{ x: 195, y: 330 }], 0, -200);
+  await drag(b, [await contentPoint(b)], 0, -200);
   assert.ok(await contentScrollY(b) > 40, '之后内容区拖动仍能滚动（导航未造成永久锁定）');
 });
 
@@ -239,7 +242,7 @@ test('原生点击与键盘：触摸点按、Enter、Space 都能切换视图，
 });
 
 test('导航即使允许原生平移，也不能滚动兄弟内容区或根页面', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
-  const b = await setup(t, { forceAuto: true });
+  const b = await setup(t, { forceAuto: true, scrollable: true });
   await drag(b, [await center(b, navButton('library'))], 0, -200);
   assert.equal(await scrollY(b), 0);
   assert.equal(await contentScrollY(b), 0);
@@ -367,7 +370,7 @@ test('standalone viewport geometry remains visible during resize and stable duri
   })()`);
   const ready = async () => {
     for (let i = 0; i < 100; i++) {
-      if (await b.evaluate(`document.body.dataset.view === 'replay' && !document.getElementById('console-shell').hidden`)) return;
+      if (await b.evaluate(`document.body?.dataset.view === 'replay' && !document.getElementById('console-shell').hidden`)) return;
       await sleep(100);
     }
     throw new Error('Fixture did not become ready');
@@ -415,7 +418,7 @@ test('standalone viewport geometry remains visible during resize and stable duri
     await device(width, 932);
     const full = await geometry(); visible(full, width + ': full');
     assert.equal(full.nav.y - before.nav.y, 59, 'real visible area growth moves nav to its new safe edge');
-    assert.equal(full.video.height, before.video.height, 'video keeps its aspect ratio instead of shrinking for controls or height reports');
+    assert.equal(full.video.height - before.video.height, 59, '专注回看的视频使用真实视口新增空间，控制区保持原高度');
     await device(width, 873); stable(before, await geometry(), width + ': restore short');
     for (const view of ['library', 'tasks', 'settings', 'replay']) {
       await b.evaluate(`document.querySelector('.mobile-nav button[data-view="${view}"]').click()`); await sleep(100);
@@ -487,13 +490,13 @@ test('standalone viewport geometry remains visible during resize and stable duri
     await sleep(100); visible(await geometry(),'safe area '+safeTop+'/'+safeBottom);
   }
   await b.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
-  await b.evaluate(`document.querySelector('.views').style.minHeight='1800px'`);
-  await drag(b,[{x:215,y:730}],0,-250);
-  assert.ok(await b.evaluate(`document.querySelector('.workspace-main').scrollTop>40`),'standalone content-origin gesture scrolls the inner workspace');
+  await b.evaluate(`document.querySelector('.replay-workspace').style.minHeight='1800px'`);
+  await drag(b,[await contentPoint(b)],0,-250);
+  assert.ok(await contentScrollY(b)>40,'standalone content-origin gesture scrolls the inner workspace');
   assert.equal(await b.evaluate(`document.querySelector('.mobile-nav').offsetParent.id`), 'console-shell', 'installed navigation is actually anchored to the fixed shell');
   assert.equal(await scrollY(b),0,'the outer page stays fixed');
   visible(await geometry(),'after content scroll');
-  await b.evaluate(`document.querySelector('.views').style.minHeight='';document.querySelector('.workspace-main').scrollTop=0;window.scrollTo(0,0)`);
+  await b.evaluate(`document.querySelector('.replay-workspace').style.minHeight='';document.querySelector('#view-replay').scrollTop=0;window.scrollTo(0,0)`);
   await device(700,430,430);
   assert.equal(await b.evaluate(`getComputedStyle(document.querySelector('.mobile-nav')).display`),'none','existing immersive replay landscape still hides nav');
   await b.evaluate(`document.querySelector('.mobile-nav button[data-view="library"]').click()`); await sleep(100);
@@ -549,16 +552,30 @@ test('settings modal scrolls its content without moving the page and restores fo
   assert.deepEqual(await b.evaluate(`({open:!!document.querySelector('dialog[open]'),locked:document.documentElement.classList.contains('dialog-scroll-locked'),focus:document.activeElement.id})`), {open:false,locked:false,focus:'settings-open-bilibili'});
 });
 
+async function syntheticVideo(b) {
+  await b.send('Runtime.evaluate', {expression:`(() => {
+    const canvas=document.createElement('canvas');canvas.width=640;canvas.height=360;
+    canvas.getContext('2d').fillRect(0,0,640,360);
+    window.__syntheticStream=canvas.captureStream(10);
+    const video=document.getElementById('replay-player');video.hidden=false;video.muted=true;
+    video.srcObject=__syntheticStream;return video.play();
+  })()`,userGesture:true,awaitPromise:true});
+  for(let i=0;i<50 && !await b.evaluate(`document.getElementById('replay-player').readyState>=2`);i++) await sleep(50);
+  assert.ok(await b.evaluate(`document.getElementById('replay-player').readyState>=2`),'合成视频必须真实加载');
+}
+
 test('transport SVGs retain visible strokes and 26px size across the responsive cascade', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
   const b = await setup(t);
+  await syntheticVideo(b);
   for (const [width,height] of [[320,740],[430,932],[667,375],[1440,900]]) {
     await b.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<1024});
     for (const playing of [false,true]) {
+      await b.evaluate(`document.getElementById('replay-player').${playing ? 'play' : 'pause'}()`); await sleep(100);
+      assert.equal(await b.evaluate(`document.getElementById('transport-toggle').getAttribute('aria-pressed')`),String(playing));
       const icons = await b.evaluate(`(() => {
-        const toggle=document.getElementById('playback-toggle');toggle.hidden=false;toggle.setAttribute('aria-pressed','${playing}');
-        return ['skip-back','playback-toggle','skip-forward'].map(id => {
+        return ['skip-back','transport-toggle','skip-forward'].map(id => {
           const button=document.getElementById(id);button.hidden=false;
-          const svg=button.querySelector(id==='playback-toggle' ? '${playing ? '.pause-mark' : '.play-mark'} svg' : 'svg');
+          const svg=button.querySelector('svg');
           const r=svg.getBoundingClientRect(),s=getComputedStyle(svg.querySelector('path'));
           return {id,width:r.width,height:r.height,stroke:s.stroke,fill:s.fill,strokeWidth:parseFloat(s.strokeWidth)};
         });
@@ -600,29 +617,57 @@ test('file-picker cancellation stays inside the account sheet and the close icon
   assert.equal(await b.evaluate(`!!document.querySelector('dialog[open]')`), false);
 });
 
-test('video buttons overlay four corners without reserving picture space and fade/reveal accessibly', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+test('focus replay keeps controls below the picture and manual hide/reveal returns space to video', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
   const b = await setup(t);
+  await syntheticVideo(b);
   await b.send('Emulation.setDeviceMetricsOverride',{width:430,height:932,deviceScaleFactor:1,mobile:true});
-  await b.send('Runtime.evaluate',{expression:`(() => {const canvas=document.createElement('canvas');canvas.width=640;canvas.height=360;canvas.getContext('2d').fillRect(0,0,640,360);window.__syntheticStream=canvas.captureStream(10);const v=document.getElementById('replay-player');v.hidden=false;v.srcObject=__syntheticStream;return v.play();})()`,userGesture:true,awaitPromise:true});
-  for(let i=0;i<50&&!await b.evaluate(`document.getElementById('replay-player').readyState>=2`);i++)await sleep(100);
-  const geometry = await b.evaluate(`(() => {const p=document.getElementById('player-wrap'),r=p.getBoundingClientRect(),v=document.getElementById('replay-player').getBoundingClientRect();return {ratio:r.width/r.height,video:[v.width,v.height],box:[r.width,r.height],controls:['go-live','playback-mute','playback-toggle','replay-fullscreen'].map(id=>{const e=document.getElementById(id),b=e.getBoundingClientRect();return {id,position:getComputedStyle(e).position,x:b.left-r.left,y:b.top-r.top,w:b.width,h:b.height};})};})()`);
-  assert.ok(Math.abs(geometry.ratio-16/9)<0.02);assert.deepEqual(geometry.video,geometry.box);
-  for(const c of geometry.controls){assert.equal(c.position,'absolute');assert.ok(c.w>=44&&c.h>=44);}
-  const [live,mute,toggle,full]=geometry.controls;
-  assert.ok(toggle.x<=12&&toggle.y<=12);assert.ok(live.x>=geometry.box[0]-60&&live.y<=12);
-  assert.ok(mute.x<=12&&mute.y>=geometry.box[1]-60);assert.ok(full.x>=geometry.box[0]-60&&full.y>=geometry.box[1]-60);
-  await sleep(2700);
-  assert.equal(await b.evaluate(`getComputedStyle(document.getElementById('playback-toggle')).opacity`),'0');
-  await b.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:200,y:200});await sleep(300);
-  assert.equal(await b.evaluate(`getComputedStyle(document.getElementById('playback-toggle')).opacity`),'1');
-  await b.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
-  await b.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
-  await b.evaluate(`document.getElementById('playback-toggle').focus()`);await sleep(2700);
-  assert.equal(await b.evaluate(`getComputedStyle(document.getElementById('playback-toggle')).opacity`),'1','keyboard focus keeps controls visible');
-  await b.evaluate(`__syntheticStream.getTracks().forEach(track=>track.stop());const v=document.getElementById('replay-player');v.pause();v.srcObject=null;`);
+  const geometry = () => b.evaluate(`(() => {
+    const box = selector => { const r=document.querySelector(selector).getBoundingClientRect(); return {top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };
+    return {video:box('#player-wrap'),panel:box('.replay-control-panel'),nav:box('.mobile-nav'),
+      fit:getComputedStyle(document.getElementById('replay-player')).objectFit,
+      legacy:getComputedStyle(document.getElementById('playback-toggle')).display,
+      idle:document.getElementById('view-replay').dataset.chromeIdle,
+      controls:['skip-back','transport-toggle','skip-forward','playback-mute','replay-fullscreen'].map(id=>({id,...box('#'+id)}))};
+  })()`);
+  const before = await geometry();
+  assert.equal(before.fit,'contain','完整画面不裁切');
+  assert.equal(before.legacy,'none','旧角落播放按钮不能与新播放三键重复显示');
+  assert.ok(before.panel.top>=before.video.bottom,'控制面不遮挡普通竖屏画面');
+  for(const control of before.controls) {
+    assert.ok(control.width>=44 && control.height>=44,control.id+' 触达尺寸');
+    assert.ok(control.top>=before.panel.top && control.bottom<=before.nav.top,control.id+' 在底栏上方完整可见');
+  }
+  // 使用实际点击事件，不改 CSS 或直接指定 chromeIdle。
+  await tap(b,await center(b,'#player-wrap')); await sleep(300);
+  const hidden=await geometry();
+  assert.equal(hidden.idle,'true'); assert.equal(hidden.panel.height,0);
+  assert.ok(hidden.video.height>before.video.height,'隐藏后空间归还给视频');
+  assert.deepEqual(hidden.nav,before.nav,'底栏位置不受折叠影响');
+  await tap(b,await center(b,'#player-wrap')); await sleep(300);
+  const restored=await geometry();
+  assert.equal(restored.idle,'false'); assert.deepEqual(restored.video,before.video);
+  assert.deepEqual(restored.panel,before.panel);
 });
 
-test('landscape corner controls retain safe-area clearance and unobstructed hit targets', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+test('landscape playback controls idle together, first touch only wakes them, and keyboard focus prevents hiding', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const b=await setup(t); await syntheticVideo(b);
+  await b.send('Emulation.setDeviceMetricsOverride',{width:844,height:390,deviceScaleFactor:1,mobile:true});
+  await sleep(3000);
+  const state=()=>b.evaluate(`({idle:document.getElementById('view-replay').dataset.chromeIdle,paused:document.getElementById('replay-player').paused,
+    panels:[...document.querySelectorAll('.replay-topbar,.replay-control-panel')].map(e=>({opacity:getComputedStyle(e).opacity,pointer:getComputedStyle(e).pointerEvents}))})`);
+  const idle=await state(); assert.equal(idle.idle,'true');
+  for(const panel of idle.panels) { assert.equal(panel.opacity,'0');assert.equal(panel.pointer,'none'); }
+  await tap(b,{x:422,y:120});await sleep(300);
+  const awake=await state();assert.equal(awake.idle,'false');assert.equal(awake.paused,idle.paused,'首次点按只唤醒，不切换播放状态');
+  for(const panel of awake.panels) assert.equal(panel.opacity,'1');
+  await b.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+  await b.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+  await b.evaluate(`document.getElementById('transport-toggle').focus()`);await sleep(3000);
+  assert.equal((await state()).idle,'false','键盘焦点期间保留控制面');
+  for(const panel of (await state()).panels) assert.equal(panel.opacity,'1');
+});
+
+test('landscape control panel retains safe-area clearance and unobstructed hit targets', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
   const b = await setup(t);
   for (const [width, height, side, bottom] of [[568,320,0,0],[667,375,0,0],[700,430,0,0],[844,390,59,21]]) {
     await b.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
@@ -632,16 +677,16 @@ test('landscape corner controls retain safe-area clearance and unobstructed hit 
       const root=document.documentElement;
       root.style.setProperty('--safe-left','${side}px');root.style.setProperty('--safe-right','${side}px');root.style.setProperty('--safe-bottom','${bottom}px');
       document.getElementById('player-wrap').classList.remove('controls-idle');
-      return ['go-live','playback-mute','playback-toggle','replay-fullscreen'].map(id => {
+      return ['transport-toggle','playback-mute','replay-fullscreen'].map(id => {
         const button=document.getElementById(id);button.hidden=false;
         const r=button.getBoundingClientRect();
-        const hits=[8,24,40].flatMap(x=>[8,24,40].map(y=>button.contains(document.elementFromPoint(r.left+x,r.top+y))));
+        const hits=[.25,.5,.75].flatMap(x=>[.25,.5,.75].map(y=>button.contains(document.elementFromPoint(r.left+r.width*x,r.top+r.height*y))));
         return {id,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,hits};
       });
     })()`);
     for (const button of evidence) {
-      assert.equal(button.width,48); assert.equal(button.height,48);
-      assert.ok(button.left>=Math.max(44,side)-1 && button.right<=width-Math.max(44,side)+1, `${width}: ${button.id} safe sides`);
+      assert.ok(button.width>=44); assert.ok(button.height>=44);
+      assert.ok(button.left>=side-1 && button.right<=width-side+1, `${width}: ${button.id} safe sides`);
       assert.ok(button.top>=0 && button.bottom<=height-bottom+1, `${width}: ${button.id} safe bottom`);
       assert.ok(button.hits.every(Boolean), `${width} expanded=${expanded}: ${button.id} hit target is unobstructed ${JSON.stringify(button)}`);
     }
@@ -726,12 +771,12 @@ test('iOS cold-start regression: short dynamic/fixed viewport still fills the la
     const observer = new MutationObserver(apply); observer.observe(document,{childList:true,subtree:true}); apply();
   ` });
   await b.send('Page.navigate', { url:`http://127.0.0.1:${server.address().port}/?fixture=normal#replay` });
-  for(let i=0;i<100 && !await b.evaluate(`document.body.dataset.view==='replay' && !document.getElementById('console-shell').hidden`);i++) await sleep(100);
-  assert.equal(await b.evaluate(`document.body.dataset.view`), 'replay');
+  for(let i=0;i<100 && !await b.evaluate(`document.body?.dataset.view==='replay' && !document.getElementById('console-shell').hidden`);i++) await sleep(100);
+  assert.equal(await b.evaluate(`document.body?.dataset.view`), 'replay');
   const geometry = () => b.evaluate(`(() => {
     const rect = selector => {const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom};};
     const strip=document.querySelector('.status-bar-background'), style=getComputedStyle(strip);
-    return {view:document.body.dataset.view,innerHeight,visualHeight:visualViewport.height,scrollY,
+    return {view:document.body?.dataset.view,innerHeight,visualHeight:visualViewport.height,scrollY,
       shell:rect('.console-shell'),nav:rect('.mobile-nav'),strip:rect('.status-bar-background'),
       stripStyle:{position:style.position,background:style.backgroundColor,pointerEvents:style.pointerEvents,filter:style.filter},
       appHeight:getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-height').trim(),
@@ -794,10 +839,10 @@ test('status-fade clearance moves four headings but never moves the shell or bot
   await b.send('Page.addScriptToEvaluateOnNewDocument', { source: `Object.defineProperty(navigator,'standalone',{configurable:true,value:true});` });
   await b.send('Emulation.setDeviceMetricsOverride', {width:430,height:932,deviceScaleFactor:1,mobile:true});
   await b.send('Page.navigate', {url:`http://127.0.0.1:${server.address().port}/?fixture=normal#replay`});
-  for(let i=0;i<100 && !await b.evaluate(`document.body.dataset.view==='replay'`);i++) await sleep(100);
-  assert.equal(await b.evaluate(`document.body.dataset.view`),'replay');
+  for(let i=0;i<100 && !await b.evaluate(`document.body?.dataset.view==='replay'`);i++) await sleep(100);
+  assert.equal(await b.evaluate(`document.body?.dataset.view`),'replay');
   const geometry = () => b.evaluate(`(() => {
-    const view=document.body.dataset.view, box=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom};};
+    const view=document.body?.dataset.view, box=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom};};
     return {view,heading:box(view==='replay'?'#app-title':'#view-'+view+' .page-heading'),pane:box('#view-'+view),nav:box('.mobile-nav'),shell:box('.console-shell'),padding:parseFloat(getComputedStyle(document.querySelector('.views')).paddingTop),scrollY,overflow:document.documentElement.scrollWidth>innerWidth};
   })()`);
   const evidence=[];
