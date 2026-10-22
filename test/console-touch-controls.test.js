@@ -1,4 +1,5 @@
 import { setButtonIcon, createSettingsRow } from '../public/ui-primitives.js';
+import { bindEnterConfirm } from '../public/touch-controls.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -39,7 +40,7 @@ class Element {
 function renameHarness(api) {
   const sheet = { content: new Element(), actions: new Element(), error: new Element(), pending: false, closed: false, setPending(value) { this.pending = value; this.actions.children.forEach(button => { button.disabled = value; }); }, close() { this.closed = true; } };
   const notices = [];
-  const context = vm.createContext({ setButtonIcon, createSettingsRow, openDialog: () => sheet, normalizeMp4Name: value => value.trim().replace(/(?:\.mp4)?$/i, '.mp4'), document: { createElement: () => new Element() }, api, body: JSON.stringify, renderOutputs() {}, refreshOutputs: async () => {}, notify: message => notices.push(message) });
+  const context = vm.createContext({ setButtonIcon, createSettingsRow, bindEnterConfirm, openDialog: () => sheet, normalizeMp4Name: value => value.trim().replace(/(?:\.mp4)?$/i, '.mp4'), document: { createElement: () => new Element() }, api, body: JSON.stringify, renderOutputs() {}, refreshOutputs: async () => {}, notify: message => notices.push(message) });
   const buttonStart = script.lastIndexOf('function addButton(');
   vm.runInContext(script.slice(buttonStart, script.indexOf('function renderOutputs(', buttonStart)), context);
   vm.runInContext(script.slice(script.indexOf('function labelledInput('), script.indexOf('function mp4Basename(')), context);
@@ -60,6 +61,30 @@ test('failed rename leaves sheet open and typed name intact with actionable serv
   const h = renameHarness(async () => { throw new Error('已有同名文件'); }); h.input.value = 'duplicate'; await h.save.click();
   assert.equal(h.sheet.closed, false); assert.equal(h.sheet.pending, false); assert.equal(h.save.disabled, false);
   assert.equal(h.input.value, 'duplicate'); assert.equal(h.sheet.error.textContent, '已有同名文件'); assert.equal(h.file.filename, 'old.mp4');
+});
+test('rename Enter ignores IME candidate selection, including Safari keydown after compositionend', () => {
+  class Input {
+    listeners = new Map();
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    removeEventListener(type) { this.listeners.delete(type); }
+    emit(type, event = {}) { return this.listeners.get(type)?.(event); }
+  }
+  let confirmed = 0, now = 1000, prevented = 0;
+  const input = new Input(), unbind = bindEnterConfirm(input, () => confirmed++, { now: () => now });
+  const enter = (extra = {}) => { input.emit('keydown', { key: 'Enter', preventDefault() { prevented++; }, ...extra }); };
+  enter(); assert.equal(confirmed, 1); assert.equal(prevented, 1);
+  input.emit('compositionstart'); enter({ isComposing: true }); enter({ keyCode: 229 });
+  assert.equal(confirmed, 1); assert.equal(prevented, 1);
+  input.emit('compositionend'); enter(); assert.equal(confirmed, 1);
+  now += 119; enter(); assert.equal(confirmed, 1);
+  now += 1; enter(); assert.equal(confirmed, 2); assert.equal(prevented, 2);
+  unbind(); enter(); assert.equal(confirmed, 2);
+});
+test('rename dialog cannot save the document from the composing Enter key', async () => {
+  const h = renameHarness(async () => ({})); h.input.value = '视觉';
+  let prevented = 0;
+  h.input.listeners.keydown({ key: 'Enter', isComposing: true, keyCode: 229, preventDefault() { prevented++; } });
+  assert.equal(prevented, 0); assert.equal(h.sheet.pending, false); assert.equal(h.file.filename, 'old.mp4');
 });
 test('all console states share shell, responsive viewport, explicit range and search controls', () => {
   const html = statusDashboardPage('/zl-camera');

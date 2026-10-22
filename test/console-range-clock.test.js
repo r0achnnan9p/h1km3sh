@@ -16,7 +16,7 @@ function harness() {
     ['function selectTime(', 'function handlePlaybackError('],
     ['function jumpToTimelineTime(', '// Lifecycle interruption'],
     ['function boundaryLabel(', 'function updateBoundaryControls('],
-    [script.includes('function syncPlaybackCursor(') ? 'function syncPlaybackCursor(' : 'function markPlaybackBoundary(', "document.addEventListener('keydown'"],
+    [script.includes('function syncPlaybackCursor(') ? 'function syncPlaybackCursor(' : 'function markPlaybackBoundary(', 'const replayStepKeys = bindKeyRepeat'],
     ["$('replay-player').addEventListener('play',", "$('replay-player').addEventListener('pause',"],
   ]) vm.runInContext(script.slice(script.indexOf(start), script.indexOf(end, script.indexOf(start))), context);
   return { state, context, $, video: $('replay-player'), notices, mark: boundary => context.markPlaybackBoundary(boundary), timeupdate: () => $('replay-player').listeners.timeupdate() };

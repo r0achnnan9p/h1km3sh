@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindPressRepeat } from '../public/press-repeat.js';
+import { bindPressRepeat, bindKeyRepeat } from '../public/press-repeat.js';
 
 class Target {
   listeners = new Map();
@@ -231,4 +231,93 @@ test('custom timings work, while invalid intervals cannot create an unbounded ti
   for (const timing of [{ delay: -1 }, { delay: NaN }, { interval: 0 }, { interval: Infinity }]) {
     assert.throws(() => bindPressRepeat(new Target(), timing), TypeError);
   }
+});
+
+function keyHarness(options = {}) {
+  const timers = clock(), document = new Target(), window = new Target();
+  document.defaultView = window; document.hidden = false;
+  window.setTimeout = timers.setTimeout; window.clearTimeout = timers.clearTimeout;
+  const calls = { starts: [], repeats: [], commits: [], cancels: [] }, context = { steps: 0 };
+  const binding = bindKeyRepeat(document, {
+    resolve: event => event.code === 'Comma' ? -10 : event.code === 'Period' ? 10 : null,
+    canStart: () => options.allowed !== false,
+    canContinue: () => options.blocked !== true,
+    onStart: action => { calls.starts.push(action); return context; },
+    onRepeat: (value, action) => { value.steps += action; calls.repeats.push(action); },
+    onCommit: (value, action) => calls.commits.push([action, value.steps]),
+    onCancel: (value, action, reason) => calls.cancels.push({ action, reason }),
+    ...options,
+  });
+  const event = (code, properties = {}) => ({ code, key: code, target: {}, ...properties });
+  return { timers, document, window, calls, context, binding, options,
+    down: (code = 'Comma', properties) => document.emit('keydown', event(code, properties)),
+    up: (code = 'Comma', properties) => document.emit('keyup', event(code, properties)),
+  };
+}
+
+test('keyboard shortcuts start immediately, repeat on their own clock and commit once on keyup', () => {
+  const h = keyHarness(); const event = h.down();
+  assert.equal(event.defaultPrevented, true); assert.deepEqual(h.calls.repeats, [-10]); assert.equal(h.context.steps, -10);
+  h.timers.advance(349); assert.deepEqual(h.calls.repeats, [-10]);
+  h.timers.advance(1); assert.deepEqual(h.calls.repeats, [-10, -10]); assert.equal(h.context.steps, -20);
+  h.timers.advance(180); assert.deepEqual(h.calls.repeats, [-10, -10, -10]);
+  // Native key repeat must not add a second gesture or another step.
+  h.down('Comma', { repeat: true }); h.timers.advance(180); assert.deepEqual(h.calls.repeats, [-10, -10, -10, -10]);
+  h.up(); h.up(); h.timers.advance(5000);
+  assert.deepEqual(h.calls.commits, [[-10, -40]]); assert.equal(h.timers.pending, 0);
+});
+
+test('a different keyup cannot settle the active hold, and canStart blocks without preventing the browser', () => {
+  const h = keyHarness(); h.down('Period'); h.up('Comma');
+  assert.deepEqual(h.calls.commits, []); h.up('Period'); assert.deepEqual(h.calls.commits, [[10, 10]]);
+  const blocked = keyHarness({ allowed: false }), event = blocked.down();
+  assert.equal(event.defaultPrevented, false); assert.deepEqual(blocked.calls.starts, []); assert.equal(blocked.timers.pending, 0);
+  assert.equal(blocked.down('Comma', { repeat: true }).defaultPrevented, false);
+  assert.equal(keyHarness().down('KeyI').defaultPrevented, false);
+});
+
+test('blur, page hiding and destroy abandon an active hold without committing', () => {
+  const blurred = keyHarness(); blurred.down(); blurred.window.emit('blur');
+  assert.deepEqual(blurred.calls.cancels, [{ action: -10, reason: 'blur' }]); assert.equal(blurred.timers.pending, 0);
+  blurred.up(); assert.deepEqual(blurred.calls.commits, []);
+  const hidden = keyHarness(); hidden.down('Period'); hidden.document.hidden = true; hidden.document.emit('visibilitychange');
+  assert.deepEqual(hidden.calls.cancels, [{ action: 10, reason: 'hidden' }]); assert.equal(hidden.timers.pending, 0);
+  const destroyed = keyHarness(); destroyed.down(); destroyed.binding.destroy(); destroyed.binding.destroy();
+  assert.deepEqual(destroyed.calls.cancels, [{ action: -10, reason: 'destroyed' }]);
+  assert.equal(destroyed.document.listenerCount, 0); assert.equal(destroyed.window.listenerCount, 0);
+});
+
+test('keyboard repeat callback failures release ownership and leave no timer behind', () => {
+  const h = keyHarness({ onRepeat() { throw new Error('key repeat failed'); } });
+  assert.throws(() => h.down(), /key repeat failed/);
+  assert.deepEqual(h.calls.cancels, [{ action: -10, reason: 'callback-error' }]);
+  assert.equal(h.timers.pending, 0);
+});
+
+test('focus in a text field, IME composition or a blocked dialog abandons a held shortcut before keyup', () => {
+  const focused = keyHarness(); focused.down();
+  focused.document.emit('focusin', { target: { matches: selector => selector.includes('input') } });
+  assert.deepEqual(focused.calls.cancels, [{ action: -10, reason: 'focus' }]);
+  assert.equal(focused.timers.pending, 0);
+  focused.up(); assert.deepEqual(focused.calls.commits, []);
+
+  const composing = keyHarness(); composing.down('Period');
+  composing.document.emit('compositionstart', { target: {} });
+  assert.deepEqual(composing.calls.cancels, [{ action: 10, reason: 'composition' }]);
+  composing.up('Period'); assert.deepEqual(composing.calls.commits, []);
+
+  const dialog = keyHarness(); dialog.down(); dialog.options.blocked = true;
+  dialog.document.emit('focusin', { target: { matches: () => false } });
+  assert.deepEqual(dialog.calls.cancels, [{ action: -10, reason: 'blocked' }]);
+  dialog.up(); assert.deepEqual(dialog.calls.commits, []);
+
+  const tick = keyHarness(); tick.down(); tick.options.blocked = true;
+  tick.timers.advance(350);
+  assert.deepEqual(tick.calls.cancels, [{ action: -10, reason: 'blocked' }]);
+  assert.deepEqual(tick.calls.repeats, [-10]); assert.equal(tick.timers.pending, 0);
+  tick.up(); assert.deepEqual(tick.calls.commits, []);
+
+  const released = keyHarness(); released.down(); released.options.blocked = true; released.up();
+  assert.deepEqual(released.calls.cancels, [{ action: -10, reason: 'blocked' }]);
+  assert.deepEqual(released.calls.commits, []);
 });
