@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { bindKeyRepeat } from '../public/press-repeat.js';
 import { createTaskFeed } from '../public/task-presentation.js';
 import { iconSvg, setButtonIcon } from '../public/ui-primitives.js';
 
@@ -143,17 +144,60 @@ test('history navigation and invalid routes also start the newly visible view at
 });
 
 function keyboardHarness(view) {
-  const handlers = [], steps = [];
-  let toggles = 0, prevented = 0;
+  const handlers = new Map(), windowHandlers = new Map(), steps = [], commits = [], cancels = [];
+  let toggles = 0, prevented = 0, now = 0, nextTimer = 0;
+  const pending = new Map();
+  const add = (map, type, listener) => { const list = map.get(type) || []; list.push(listener); map.set(type, list); };
+  const remove = (map, type, listener) => {
+    const list = (map.get(type) || []).filter(value => value !== listener);
+    if (list.length) map.set(type, list); else map.delete(type);
+  };
+  const timers = {
+    setTimeout(callback, delay) { const id = ++nextTimer; pending.set(id, { callback, at: now + delay }); return id; },
+    clearTimeout(id) { pending.delete(id); },
+    advance(milliseconds) {
+      const until = now + milliseconds;
+      while (true) {
+        const entry = [...pending].filter(([, timer]) => timer.at <= until).sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+        if (!entry) break;
+        pending.delete(entry[0]); now = entry[1].at; entry[1].callback();
+      }
+      now = until;
+    },
+  };
   class HTMLElement { constructor(tag = '') { this.tag = tag; } matches(selector) { return selector.split(',').map(value => value.trim()).includes(this.tag); } }
-  const document = { body: { dataset: { view } }, addEventListener: (_, handler) => handlers.push(handler) };
-  const context = vm.createContext({ document, HTMLElement, activeDialog: null, $: () => ({ hidden: false }),
-    stepReplay: seconds => steps.push(seconds), toggleReplayPlayback: () => toggles++,
+  const window = {
+    setTimeout: (callback, delay) => timers.setTimeout(callback, delay), clearTimeout: id => timers.clearTimeout(id),
+    addEventListener: (type, listener) => add(windowHandlers, type, listener), removeEventListener: (type, listener) => remove(windowHandlers, type, listener),
+  };
+  const document = {
+    body: { dataset: { view } }, hidden: false, defaultView: window,
+    addEventListener: (type, listener) => add(handlers, type, listener), removeEventListener: (type, listener) => remove(handlers, type, listener),
+  };
+  const context = vm.createContext({ document, window, HTMLElement, activeDialog: null, bindKeyRepeat, replayHoldButtons: [],
+    $: () => ({ hidden: false, disabled: false, classList: { contains: () => false }, click() {} }),
+    beginReplayHold: () => ({ action: 'hold' }), repeatReplayHold: (_, seconds) => steps.push(seconds),
+    commitReplayHold: () => commits.push(true), abandonReplayHold: () => cancels.push(true),
+    toggleReplayPlayback: () => toggles++, setTimelineSpan: () => {},
   });
-  const start = script.indexOf("document.addEventListener('keydown', event => {");
+  const start = script.indexOf('const replayStepKeys = bindKeyRepeat(document, {');
+  assert.ok(start > 0, 'missing keyboard repeat binding');
   vm.runInContext(script.slice(start, script.indexOf("$('export-range').addEventListener", start)), context);
-  const key = (code, extras = {}) => handlers[0]({ code, target: {}, preventDefault() { prevented++; }, ...extras });
-  return { context, steps, key, toggles: () => toggles, prevented: () => prevented, HTMLElement };
+  const emit = (type, code, extras = {}) => {
+    const event = { code, key: code, target: {}, defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; prevented++; }, ...extras };
+    for (const handler of handlers.get(type) || []) handler(event);
+    return event;
+  };
+  const down = (code, extras) => emit('keydown', code, extras);
+  const up = (code, extras) => emit('keyup', code, extras);
+  const key = (code, extras = {}) => { down(code, extras); up(code, extras); };
+  return { context, steps, commits, cancels, HTMLElement, timers,
+    key, down, up,
+    toggles: () => toggles, prevented: () => prevented,
+    blur: () => { for (const handler of windowHandlers.get('blur') || []) handler({}); },
+    hide: () => { document.hidden = true; for (const handler of handlers.get('visibilitychange') || []) handler({}); },
+  };
 }
 
 test('replay shortcuts cannot start hidden playback from library, tasks, settings or the signed-out screen', () => {
@@ -195,6 +239,24 @@ test('held shortcuts prevent browser defaults but perform one operation per phys
   }
   assert.deepEqual(h.steps, [-10, 10]); assert.equal(h.toggles(), 1); assert.equal(h.prevented(), 15);
   h.key('Space', { target }); assert.equal(h.toggles(), 2);
+});
+test('holding a step shortcut repeats locally and commits exactly once on release', () => {
+  const h = keyboardHarness('replay');
+  h.down('Comma'); assert.deepEqual(h.steps, [-10]);
+  h.timers.advance(349); assert.deepEqual(h.steps, [-10]);
+  h.timers.advance(1); assert.deepEqual(h.steps, [-10, -10]);
+  h.down('Comma', { repeat: true }); h.timers.advance(180); assert.deepEqual(h.steps, [-10, -10, -10]);
+  h.up('Comma'); assert.equal(h.commits.length, 1); h.timers.advance(1000); assert.deepEqual(h.steps, [-10, -10, -10]);
+  assert.equal(h.prevented(), 2);
+});
+test('a different step key release cannot commit an active hold, while blur or hiding cancels it', () => {
+  const h = keyboardHarness('replay');
+  h.down('Period'); h.up('Comma'); assert.deepEqual(h.commits, []);
+  h.up('Period'); assert.equal(h.commits.length, 1);
+  const blurred = keyboardHarness('replay'); blurred.down('Comma'); blurred.blur();
+  assert.equal(blurred.cancels.length, 1); blurred.up('Comma'); assert.deepEqual(blurred.commits, []);
+  const hidden = keyboardHarness('replay'); hidden.down('Period'); hidden.hide();
+  assert.equal(hidden.cancels.length, 1); hidden.up('Period'); assert.deepEqual(hidden.commits, []);
 });
 test('all text entry controls, contenteditable, dialogs and composition retain native keyboard behavior', () => {
   const h = keyboardHarness('replay');

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { bindPressRepeat } from '../public/press-repeat.js';
+import { bindPressRepeat, bindKeyRepeat } from '../public/press-repeat.js';
 
 const source = fs.readFileSync(new URL('../public/console.js', import.meta.url), 'utf8');
 function load(context, name) {
@@ -91,7 +91,7 @@ function harness({ paused = false, buffered = false, playbackSource = 'mediamtx'
     playBounds: { start: base, duration: 120, end: base + 120000, src: mediaUrl, camera: 'camera-a', date },
     segments: [{ start: new Date(day).toISOString(), duration: 86400 }] };
   const replayHoldButtons = [];
-  const context = vm.createContext({ state, $, document, window, bindPressRepeat, replayHoldButtons,
+  const context = vm.createContext({ state, $, document, window, bindPressRepeat, bindKeyRepeat, activeDialog: null, replayHoldButtons,
     Date: class extends Date { static now() { return now; } }, today: () => '2020-02-04',
     renderTimeline() { calls.renders++; }, updateCursor() { calls.updates++; },
     showScrubTime: (...args) => calls.labels.push(args), fadeScrubTime() { calls.fades++; },
@@ -295,4 +295,37 @@ test('十秒短按在日期末尾停于23:59:59，今日夹到当前整秒，回
     assert.deepEqual(h.calls.previews, [{ ms: expected, autoplay: false }]);
     assert.equal(h.state.cursorMs, expected); assert.equal(h.state.cursorMs % 1000, 0);
   }
+});
+
+test('keyboard step shortcuts share the same local hold and single final seek as the buttons', () => {
+  const h = harness();
+  const down = (code) => h.document.emit('keydown', { code, key: code, target: {}, preventDefault() { this.prevented = true; } });
+  const up = code => h.document.emit('keyup', { code, key: code, target: {} });
+  assert.equal(down('Period').prevented, true);
+  assert.equal(h.state.cursorMs, h.base + 20000); assert.equal(h.calls.previews.length, 0);
+  h.timers.advance(349); assert.equal(h.state.cursorMs, h.base + 20000);
+  h.timers.advance(1); assert.equal(h.state.cursorMs, h.base + 30000);
+  h.timers.advance(180); assert.equal(h.state.cursorMs, h.base + 40000);
+  up('Period'); h.timers.advance(2000);
+  assert.deepEqual(h.calls.previews, [{ ms: h.base + 40000, autoplay: true }]);
+  assert.equal(h.state.holdSeek, null); assert.equal(h.timers.pending, 0);
+});
+
+test('keyboard short taps step once on release and keep the original playback intent', () => {
+  const h = harness({ paused: true });
+  const down = code => h.document.emit('keydown', { code, key: code, target: {}, preventDefault() {} });
+  const up = code => h.document.emit('keyup', { code, key: code, target: {} });
+  down('Comma'); assert.equal(h.state.cursorMs, h.base); assert.equal(h.calls.previews.length, 0);
+  up('Comma'); h.timers.advance(1000);
+  assert.deepEqual(h.calls.previews, [{ ms: h.base, autoplay: false }]); assert.equal(h.calls.seeks.length, 0);
+});
+
+test('a changed source cancels the keyboard hold before its release can seek', () => {
+  const h = harness();
+  h.document.emit('keydown', { code: 'Period', key: 'Period', target: {}, preventDefault() {} });
+  h.timers.advance(180);
+  h.$('date-select').emit('change');
+  h.document.emit('keyup', { code: 'Period', key: 'Period', target: {} });
+  h.timers.advance(1000);
+  assert.equal(h.calls.previews.length, 0); assert.equal(h.calls.seeks.length, 0); assert.equal(h.state.holdSeek, null);
 });

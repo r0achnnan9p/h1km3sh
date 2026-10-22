@@ -129,3 +129,110 @@ export function bindPressRepeat(button, {
     },
   };
 }
+
+/**
+ * Bind hold-to-repeat keyboard shortcuts on a document. resolve(event) returns
+ * the action for a keydown, or null for keys this binding does not own.
+ * The first keydown starts and applies one step immediately, native key repeat
+ * is ignored, then the action repeats after `delay` every `interval`. Keyup
+ * commits once; a different key's keyup cannot settle the active gesture.
+ */
+export function bindKeyRepeat(document, {
+  resolve,
+  canStart = () => true,
+  onStart = () => undefined,
+  onRepeat = () => {},
+  onCommit = () => {},
+  onCancel = () => {},
+  delay = 350,
+  interval = 180,
+} = {}) {
+  if (typeof resolve !== 'function') throw new TypeError('bindKeyRepeat requires a resolve(event) function.');
+  if (!Number.isFinite(delay) || delay < 0 || !Number.isFinite(interval) || interval <= 0) {
+    throw new TypeError('Key-repeat timing must be finite, with delay >= 0 and interval > 0.');
+  }
+  if (!document?.addEventListener) throw new TypeError('bindKeyRepeat requires a document event target.');
+  const window = document.defaultView ?? globalThis.window;
+  const schedule = window?.setTimeout?.bind(window) ?? globalThis.setTimeout;
+  const unschedule = window?.clearTimeout?.bind(window) ?? globalThis.clearTimeout;
+  const listeners = [];
+  let active = null, destroyed = false;
+
+  const unavailable = () => document.hidden === true;
+  function listen(target, name, listener, options) {
+    if (!target?.addEventListener) return;
+    target.addEventListener(name, listener, options);
+    listeners.push(() => target.removeEventListener(name, listener, options));
+  }
+  function stop(current) {
+    if (current.timer !== null) unschedule(current.timer);
+    current.timer = null;
+  }
+  function finish(commit, reason) {
+    const current = active;
+    if (!current) return false;
+    active = null;
+    stop(current);
+    if (commit) onCommit(current.context, current.action);
+    else onCancel(current.context, current.action, reason);
+    return true;
+  }
+  function cancel(reason = 'cancelled') { return finish(false, reason); }
+  function repeat(current) {
+    if (active !== current || destroyed) return;
+    current.timer = null;
+    if (unavailable()) { cancel('unavailable'); return; }
+    try { onRepeat(current.context, current.action); }
+    catch (error) {
+      if (active === current) cancel('callback-error');
+      throw error;
+    }
+    if (active === current && !destroyed) current.timer = schedule(() => repeat(current), interval);
+  }
+  function matchesKey(event, current) {
+    if (current.code !== null && event.code != null) return event.code === current.code;
+    return current.key !== null && event.key === current.key;
+  }
+  function keydown(event) {
+    if (destroyed) return;
+    const action = resolve(event);
+    if (action === null || action === undefined || action === false) return;
+    // Native repeat would bypass the local hold and issue extra seeks. Only
+    // swallow it when this binding owns the gesture, so holding a comma inside
+    // a text field still types normally.
+    if (event.repeat) {
+      if (active || canStart(event)) event.preventDefault?.();
+      return;
+    }
+    if (active || unavailable() || !canStart(event)) return;
+    event.preventDefault?.();
+    const current = { action, code: event.code ?? null, key: event.key ?? null, context: undefined, timer: null };
+    active = current;
+    try {
+      current.context = onStart(action, event);
+      onRepeat(current.context, action);
+    } catch (error) {
+      if (active === current) cancel('callback-error');
+      throw error;
+    }
+    if (active === current && !destroyed) current.timer = schedule(() => repeat(current), delay);
+  }
+  function keyup(event) {
+    if (!active || !matchesKey(event, active)) return;
+    finish(true);
+  }
+  listen(document, 'keydown', keydown);
+  listen(document, 'keyup', keyup);
+  listen(window, 'blur', () => cancel('blur'));
+  listen(document, 'visibilitychange', () => { if (document.hidden === true) cancel('hidden'); });
+
+  return {
+    cancel,
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      try { cancel('destroyed'); }
+      finally { for (const remove of listeners) remove(); listeners.length = 0; }
+    },
+  };
+}

@@ -100,6 +100,30 @@ export function fitDialogViewport(dialog) {
     dialog.removeEventListener('focusin', schedule);
   };
 }
+/**
+ * Enter submits only after IME composition has ended. Safari on macOS can
+ * dispatch the candidate-selection Enter after compositionend, when
+ * isComposing is already false, so keep a short grace period for that key.
+ */
+export function bindEnterConfirm(input, confirm, { now = Date.now, grace = 120 } = {}) {
+  let composing = false, compositionEndedAt = -Infinity;
+  const start = () => { composing = true; };
+  const end = () => { composing = false; compositionEndedAt = now(); };
+  const keydown = event => {
+    if (event.key !== 'Enter') return;
+    if (event.isComposing || event.keyCode === 229 || composing || now() - compositionEndedAt < grace) return;
+    event.preventDefault();
+    confirm(event);
+  };
+  input.addEventListener('compositionstart', start);
+  input.addEventListener('compositionend', end);
+  input.addEventListener('keydown', keydown);
+  return () => {
+    input.removeEventListener?.('compositionstart', start);
+    input.removeEventListener?.('compositionend', end);
+    input.removeEventListener?.('keydown', keydown);
+  };
+}
 export function labelledInput(parent, label, value, { placeholder = '', maxLength = 255 } = {}) {
   const wrap = document.createElement('label'); wrap.className = 'field';
   const text = document.createElement('span'); text.textContent = label;

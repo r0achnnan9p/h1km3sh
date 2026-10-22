@@ -3,12 +3,12 @@ import { createOutputDownload } from './output-download.js';
 import { iconSvg, setButtonIcon, createSettingsRow, formatClipDuration, createSlidingNavigation } from './ui-primitives.js';
 import { createUploadAccounts } from './upload-accounts.js';
 import { createOutputPlayers } from './output-player.js';
-import { activeDialog, openDialog, labelledInput, normalizeMp4Name, rangeTimeMs, openCalendar, enhanceTimeInput } from './touch-controls.js';
+import { activeDialog, openDialog, labelledInput, bindEnterConfirm, normalizeMp4Name, rangeTimeMs, openCalendar, enhanceTimeInput } from './touch-controls.js';
 import { setupDebugMark } from './debug-mark.js';
 import { startMediaMtxLive } from './mediamtx-live-player.js';
 import { listCoverageGaps, formatCoverageGap } from './playback-coverage.js';
 import { createReplayControls } from './replay-controls.js';
-import { bindPressRepeat } from './press-repeat.js';
+import { bindPressRepeat, bindKeyRepeat } from './press-repeat.js';
 import { taskProgressPresentation, taskStageLabel, taskProgressCaption, uploadProgressCaption, createTaskFeed, createCollectionFeed, createTransferSampler, fmtBps, formatTransferBytes, formatEta } from './task-presentation.js';
 
 // iOS may ignore viewport scale limits; cancel only browser page-zoom gestures.
@@ -1352,6 +1352,21 @@ for (const id of ['date-select', 'playback-source', 'camera-select', 'dvr-select
   $(id).addEventListener('change', cancelReplayHold, true);
 }
 $('replay-player').addEventListener('timeupdate', syncPlaybackCursor);
+const replayStepKeys = bindKeyRepeat(document, {
+  resolve: event => ({ Comma: -10, ArrowLeft: -10, Period: 10, ArrowRight: 10 })[event.code] ?? null,
+  canStart: event => {
+    if (activeDialog?.open || event.defaultPrevented) return false;
+    const target = event.target;
+    if (target?.isContentEditable || target?.matches?.('input, textarea, select')) return false;
+    if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
+    return document.body.dataset.view === 'replay';
+  },
+  onStart: beginReplayHold,
+  onRepeat: repeatReplayHold,
+  onCommit: commitReplayHold,
+  onCancel: abandonReplayHold,
+});
+replayHoldButtons.push(replayStepKeys);
 document.addEventListener('keydown', event => {
   const target = event.target;
   if (activeDialog?.open || event.defaultPrevented) return;
@@ -1361,16 +1376,14 @@ document.addEventListener('keydown', event => {
     event.preventDefault(); if (!event.repeat) $('output-search').focus(); return;
   }
   if (document.body.dataset.view !== 'replay') return;
-  const step = ['Comma', 'ArrowLeft'].includes(event.code) ? -10 : ['Period', 'ArrowRight'].includes(event.code) ? 10 : 0;
   const playback = event.code === 'Space' && !$('replay-player').hidden;
   const shortcuts = { KeyI: 'mark-in', KeyO: 'mark-out', KeyF: 'replay-fullscreen', KeyM: 'playback-mute', Escape: 'clear-marks' };
   const button = shortcuts[event.code];
   const span = { Digit1: 86400, Digit2: 3600, Digit3: 300, Digit4: 30 }[event.code];
-  if (!step && !playback && !button && !span) return;
+  if (!playback && !button && !span) return;
   // One physical press produces one action; focused timeline handlers take precedence.
   event.preventDefault(); if (event.repeat) return;
-  if (step) stepReplay(step);
-  else if (playback) toggleReplayPlayback();
+  if (playback) toggleReplayPlayback();
   else if (span) setTimelineSpan(span);
   else if (event.code === 'Escape' && (document.fullscreenElement || $('view-replay').classList?.contains('replay-expanded')
     || (typeof replayFullscreenPending !== 'undefined' && replayFullscreenPending))) void leaveReplayFullscreen();
@@ -2598,7 +2611,7 @@ function renameOutput(file) {
       refreshOutputs().catch(() => notify('名称已保存，列表同步失败，请刷新列表。', true));
     } catch (error) { sheet.setPending(false); save.textContent = '保存'; sheet.error.textContent = error.message; input.focus(); refreshOutputs().catch(() => {}); }
   });
-  input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); save.click(); } });
+  bindEnterConfirm(input, () => save.click());
   // Synchronous focus retains iOS keyboard activation; select only on opening.
   input.focus({ preventScroll: true }); input.select(); input.setSelectionRange(0, input.value.length);
 }
