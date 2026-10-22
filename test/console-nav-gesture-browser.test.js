@@ -677,7 +677,7 @@ test('landscape control panel retains safe-area clearance and unobstructed hit t
       const root=document.documentElement;
       root.style.setProperty('--safe-left','${side}px');root.style.setProperty('--safe-right','${side}px');root.style.setProperty('--safe-bottom','${bottom}px');
       document.getElementById('player-wrap').classList.remove('controls-idle');
-      return ['transport-toggle','playback-mute','replay-fullscreen'].map(id => {
+      return ['go-live','transport-toggle','playback-mute','replay-fullscreen'].map(id => {
         const button=document.getElementById(id);button.hidden=false;
         const r=button.getBoundingClientRect();
         const hits=[.25,.5,.75].flatMap(x=>[.25,.5,.75].map(y=>button.contains(document.elementFromPoint(r.left+r.width*x,r.top+r.height*y))));
