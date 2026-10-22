@@ -25,7 +25,7 @@ function harness() {
     window:{matchMedia:()=>({matches:false})},taskFeeds:{exports:{resume(){},reveal(){return false;}},uploads:{resume(){},reveal(){return false;}}},
     leaveReplayFullscreen:async()=>true, navigate:view=>{navigations.push(view);document.body.dataset.view=view;}, body:JSON.stringify, wallTime:ms=>'2026-10-01 12:00:'+String(ms/1000), api:async(url,options)=>{requests.push({url,options,payload:JSON.parse(options.body)});return url.includes('/upload/')?{job:{id:'fixture-upload'},status:'queued'}:{taskId:'fixture-export',status:'queued'};}, refreshState:async()=>{refreshes++;}, updateSelection(){$('export-range').disabled=state.busy;}, setTimeout(fn){timers.set(++id,fn);return id;}, clearTimeout(key){timers.delete(key);} });
   vm.runInContext(code.slice(code.indexOf('function hasPlaybackSelection('),code.indexOf('function invalidatePlaybackSelection(')),context);
-  vm.runInContext(code.slice(code.indexOf('function playbackContextKey('),code.indexOf('function openBoundaryEditor(')),context);
+  vm.runInContext(code.slice(code.indexOf('function playbackContextKey('),code.indexOf('function updateSelection(')),context);
   vm.runInContext('let toastTimer;'+code.slice(code.indexOf('function notify('),code.indexOf('async function api(')),context);
   vm.runInContext(code.slice(code.indexOf("$('export-range').addEventListener('click'"),code.indexOf('function confirmIncompleteExport(')),context);
   vm.runInContext(code.slice(code.indexOf('function rememberSubmittedTask('),code.indexOf('function syncTaskLayout(')),context);

@@ -9,7 +9,6 @@
 | `docs/design-system.md`（本文件） | 原则、Token、组件、交互、断点、文案、禁止清单 | 很少变 |
 | `docs/ui-glass-spec.md` | 每一屏的具体布局和尺寸（手机 + 桌面） | 改版时变 |
 | 设计画布（`docs/design/*.png` 为导出截图） | 视觉参照 | 改版时变 |
-| `docs/ui-build-steps.md` | 分步施工提示词 | 施工期间 |
 | `public/console.css` 的 `:root` | Token 的**唯一代码来源** | 随本文件变 |
 
 冲突时的优先级：本文件 > `ui-glass-spec.md` > 画布截图 > 现有代码。现有代码和规范不一致时，以规范为准改代码；规范本身说不清时，**停下来问**，不要自己发明新样式。
@@ -233,7 +232,7 @@
 ## 13. 守护
 
 - `AGENTS.md` 要求 UI 改动先读本文件。
-- 守卫测试 `test/design-tokens.test.js` 扫描 `public/*.css`：新版控制台 `:root` 外的彩色值、未登记圆角、透明度和外部字体被拒绝。旧 LAN 入口的 `style.css` 仍由内部 30001 静态路由使用，并有设备编辑测试引用，不能按“无引用”删除；它以精确文件摘要冻结，不因 PWA 收口改动。其主题统一或退役另行处理，不能新增其他豁免。全部前端 JS 的静态 SVG 必须集中在 `ui-primitives.js`。
+- 守卫测试 `test/design-tokens.test.js` 扫描 `public/*.css`：控制台 `:root` 外的彩色值、未登记圆角、透明度和外部字体被拒绝。旧 LAN 入口及其 `style.css` 已删除，不得重新引入豁免；全部前端 JS 的静态 SVG 必须集中在 `ui-primitives.js`。
 - 改设计系统的顺序：先改本文件 → 再改 `:root` → 最后改组件代码，同一个提交里完成。
 
 ## 附录 A：待补图标路径（24×24 视框，描边）

@@ -36,11 +36,11 @@ $env:HIKVISION_MEDIAMTX_API_URL = ''
 node server.js
 ~~~
 
-Open http://127.0.0.1:30001 on the same host; stop with Ctrl+C. An empty recorder/archive list is expected before configuration. Keep data/ (including credentials) and downloads/ private and out of Git. See [source setup](docs/oss-quickstart.md) for storage and MediaMTX settings. Node.js 24 can read your private configuration with node --env-file=YOUR_PRIVATE_FILE server.js; the app does not automatically load .env.
+Port 30001 serves API and static modules only; `/` returns 404. Open the web console through the separate protected 30002 gateway described under “Safe access and use.” Stop with Ctrl+C. An empty recorder/archive list is expected before configuration. Keep data/ (including credentials) and downloads/ private and out of Git. See [source setup](docs/oss-quickstart.md) for storage and MediaMTX settings. Node.js 24 can read your private configuration with node --env-file=YOUR_PRIVATE_FILE server.js; the app does not automatically load .env.
 
 ## Safe access and use
 
-**30001 is an unauthenticated internal API/legacy interface with device credentials and downloads. Keep HIKCLIP_BIND=127.0.0.1. Never proxy, forward or publicly expose it.** Without an explicit bind, the generic launcher still defaults to 0.0.0.0.
+**30001 is an unauthenticated internal API with device credentials and downloads, and it no longer serves a web entry point. Keep HIKCLIP_BIND=127.0.0.1. Never proxy, forward or publicly expose it.** Without an explicit bind, the generic launcher still defaults to 0.0.0.0.
 
 For a phone, another host or remote access, configure the independent **30002 protected gateway behind HTTPS**: HIKCLIP_PUBLIC_PORT, HIKCLIP_PUBLIC_BIND, the actual HTTPS HIKCLIP_PUBLIC_BASE_URL, a separate MCP token file, and a console password. Set HIKCLIP_LOGIN_PASSWORD (8–128 characters) in your private environment or initialize locally with npm run setup:status-password. Keep setup codes, tokens and passwords private. Proxy only 30002 and restrict its reachability. See [gateway/MCP](docs/camera-mcp.md) and [security](SECURITY.md).
 

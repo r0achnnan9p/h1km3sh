@@ -33,7 +33,7 @@ node server.js mcp   # stdio MCP；它是常驻 HTTP 服务的客户端，不另
 | 摄像头别名、MediaMTX、自动选源、OAuth/Bearer、签名下载与公网 Tunnel | [docs/camera-mcp.md](docs/camera-mcp.md) |
 | 开机自启、service install/start/stop/status/logs | [docs/background-service.md](docs/background-service.md) |
 | 便携包、SEA、跨平台构建 | [docs/cross-build.md](docs/cross-build.md)；Windows 细节见 [docs/build-windows-exe.md](docs/build-windows-exe.md) |
-| Web UI 视觉和交互 | **必读** [设计系统](docs/design-system.md)，再按页面读 [各屏规格](docs/ui-glass-spec.md)；分步施工见 [施工手册](docs/ui-build-steps.md)。`docs/ui-principles.md` 与 `.kiro/steering/ui-design.md` 只是指向这两份文件的摘要 |
+| Web UI 视觉和交互 | **必读** [设计系统](docs/design-system.md)，再按页面读 [各屏规格](docs/ui-glass-spec.md)。`docs/ui-principles.md` 与 `.kiro/steering/ui-design.md` 只是指向这两份文件的摘要 |
 
 ## 核心铁律
 

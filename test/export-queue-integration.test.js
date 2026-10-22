@@ -37,14 +37,13 @@ function harness({ records = [], reconciled = [], reservedNames = [], previewCle
     allocateArtifact: () => ({ file: '/artifact/output.mp4', url: '/artifact/output.mp4' }),
     artifactWorkDir: () => '/fixture/work', cleanArtifactWork() {},
     signedMediaTask: task => task,
-    runRtspClipExport: pipeline, runMp4DownloadPipeline: pipeline, runParallelDownload: pipeline,
-    runSingleStreamExport: pipeline,
+    runRtspClipExport: pipeline, runMp4DownloadPipeline: pipeline,
   });
   vm.runInContext(`let sseClients = []; let consolePreviewGeneration = 0; let activePreview = { stop() { return previewStopped(); } };
     const CHANNEL_PATTERN = /^\\d{1,8}$/; const HIK_COMPACT_TIME_PATTERN = /^\\d{8}T\\d{6}Z$/;
-    ${part('const activeTasks = new Map();', '// Per-IP RTSP path hint')}
+    ${part('const activeTasks = new Map();', 'function broadcastProgress(')}
     ${part('function broadcastProgress(', '/** 当前正在跑的导出任务')}
-    ${part("app.post(['/api/export/stop'", '// Helper to convert HH:MM:SS')}
+    ${part("app.post(['/api/export/stop'", '// 4. Export Video')}
     ${part('function startCameraJob(', 'const mediaArchive =')}
     ${part('function restoreCameraJob(', 'function startScheduler(')}
     ${part('function startExportTask(', "app.post('/api/export',")}
@@ -143,19 +142,6 @@ test('actual camera outer lease encompasses nested export and cleanup, then star
   h.gates[1].resolve('/fixture/second.mp4'); await b[TASK_COMPLETION];
   assert.equal(h.activeTasks.get(a.taskId).status, 'completed');
 });
-
-test('actual raw RTSP parallel fallback remains under one completion lease', async () => {
-  const h = harness();
-  const a = h.startExportTask({ ...options, method: 'rtsp', endTime: '20260101T100500Z' });
-  const b = h.startExportTask({ ...options, channel: '201' });
-  await flush(); assert.equal(h.calls.length, 1);
-  h.gates[0].resolve({ fallback: true }); await flush(); assert.equal(h.calls.length, 2);
-  assert.equal(h.calls[1].taskId, a.taskId); assert.equal(h.activeTasks.get(b.taskId).status, 'queued');
-  h.gates[1].resolve('/fixture/raw.mp4'); await a[TASK_COMPLETION]; await flush();
-  assert.equal(h.calls.length, 3); assert.equal(h.calls[2].taskId, b.taskId);
-  h.gates[2].resolve('/fixture/second.mp4'); await b[TASK_COMPLETION];
-});
-
 
 test('actual stop endpoint cancels waiting work and reports running cleanup without starting next', async () => {
   const h = harness();

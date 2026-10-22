@@ -26,7 +26,7 @@ node app.js service <命令>                     # 便携包（Windows 是 node.
 | `uninstall` | 停止 + 删除服务定义（日志保留） |
 | `start` / `stop` | 起停当前进程，服务定义不动 |
 | `restart` | 重启 |
-| `status` | 装没装 / 自启开没开 / 跑没跑 / PID / 访问地址 / 日志路径 / 启动命令 |
+| `status` | 装没装 / 自启开没开 / 跑没跑 / PID / API 地址 / 日志路径 / 启动命令 |
 | `enable` / `disable` | 只切开机自启，不影响当前正在跑的进程 |
 | `logs` | 看日志，`-n 200` 指定行数，`-f` 持续跟随 |
 
@@ -44,7 +44,7 @@ node app.js service <命令>                     # 便携包（Windows 是 node.
   安装状态  已安装
   开机自启  已启用
   运行状态  运行中（PID 2420）
-  访问地址  http://localhost:30001
+  API 地址  http://localhost:30001
             http://192.168.50.21:30001
   服务定义  /Users/xxx/Library/LaunchAgents/com.hikvision.video-extractor.plist
   日志文件  /path/to/项目/data/service/service.log

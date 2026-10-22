@@ -71,9 +71,9 @@ test('API session expiry carries HTTP status so cached source data cannot mask l
 });
 test('clear marks removes both endpoints and export overlay without changing playback or cursor', () => {
   const nodes = new Map(), $ = id => { if (!nodes.has(id)) nodes.set(id, new Node()); return nodes.get(id); };
-  const state = { inMs: 100000, outMs: 200000, cursorMs: 150000, playBounds: { start: 90000, duration: 30 }, date: '2026-10-01', segments: [], playbackSource: 'mediamtx', busy: false, dragging: false, pendingScrub: null };
+  const state = { inMs: 100000, outMs: 200000, cursorMs: 150000, playBounds: { start: 90000, duration: 30 }, date: '2026-10-01', segments: [], playbackSource: 'mediamtx', busy: false, dragging: false };
   let cancels = 0;
-  const c = vm.createContext({ formatClipDuration, $, state, dateStart: () => 0, boundaryLabel: String, updateBoundaryControls() {}, findCoverageGap: () => null, hasPlaybackSelection: () => true, timelineWindow: () => ({ start: 0, end: 86400000, span: 86400000 }), timelinePercent: () => 1, notify() {}, interruptTimelineScrub() { if (state.dragging) cancels++; state.dragging = false; state.pendingScrub = null; } });
+  const c = vm.createContext({ formatClipDuration, $, state, dateStart: () => 0, boundaryLabel: String, updateBoundaryControls() {}, findCoverageGap: () => null, hasPlaybackSelection: () => true, timelineWindow: () => ({ start: 0, end: 86400000, span: 86400000 }), timelinePercent: () => 1, notify() {}, interruptTimelineScrub() { if (state.dragging) cancels++; state.dragging = false; } });
   for (const id of ['range-overlay', 'overview-selection']) $(id).style = {};
   vm.runInContext(script.slice(script.indexOf('function clearMarkedRange('), script.indexOf("$('date-select').addEventListener('change'")), c);
   vm.runInContext(script.slice(script.indexOf('function updateSelection('), script.indexOf('function clearReplay(')), c);
@@ -82,7 +82,7 @@ test('clear marks removes both endpoints and export overlay without changing pla
   $('clear-marks').dispatchEvent(new Event('click'));
   assert.equal(state.inMs, null); assert.equal(state.outMs, null); assert.equal(state.cursorMs, 150000); assert.equal(state.playBounds.start, 90000);
   assert.equal($('range-overlay').hidden, true); assert.equal($('overview-selection').hidden, true); assert.equal($('export-range').disabled, true); assert.equal($('clear-marks').disabled, true); assert.equal(cancels, 0);
-  state.inMs = 100000; state.dragging = true; state.dragPointerId = 7; state.pendingScrub = {}; $('clear-marks').dispatchEvent(new Event('click')); assert.equal(cancels, 1); assert.equal(state.inMs, null); assert.equal(state.pendingScrub, null);
+  state.inMs = 100000; state.dragging = true; $('clear-marks').dispatchEvent(new Event('click')); assert.equal(cancels, 1); assert.equal(state.inMs, null);
 });
 
 test('account reauthentication is explicit and retains unsaved configuration and settings drafts', () => {

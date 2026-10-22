@@ -170,7 +170,7 @@ require('./server.bundle.js');
       'title H1kM3sh',
       'echo ========================================',
       'echo   H1kM3sh',
-      'echo   http://localhost:30001',
+      'echo   API: http://localhost:30001',
       'echo ========================================',
       'echo.',
       '',
@@ -198,7 +198,7 @@ require('./server.bundle.js');
       'DIR="$(cd "$(dirname "$0")" && pwd)"',
       'echo "========================================"',
       'echo "  H1kM3sh"',
-      'echo "  http://localhost:30001"',
+      'echo "  API: http://localhost:30001"',
       'echo "========================================"',
       'echo ""',
       '',
@@ -230,10 +230,7 @@ require('./server.bundle.js');
   console.log(`  ├── app.js                 (entry point)`);
   console.log(`  ├── server.bundle.js       (bundled application)`);
   console.log(`  ├── ${platform.launcher.padEnd(22)} (launcher script)`);
-  console.log(`  ├── public/`);
-  console.log(`  │   ├── index.html`);
-  console.log(`  │   ├── app.js`);
-  console.log(`  │   └── style.css`);
+  console.log(`  ├── public/                (console assets)`);
   console.log(`  └── downloads/`);
   console.log(`\n⚠️  Requires ffmpeg installed on the target system and available in PATH.`);
   console.log(`\nTo distribute: zip/tar the entire dist-${target}/ folder.`);

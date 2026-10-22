@@ -85,8 +85,7 @@ test('natural playback moves the ruler under its centre; unready and dragged clo
   for (let time = 3; time <= 10; time++) { playing(h, time); h.timeupdate(); assert.equal(h.state.timelineStartMs + 1800000, h.state.cursorMs); }
   const moved = h.state.timelineStartMs;
   h.state.dragging = true; playing(h, 590); h.timeupdate(); assert.equal(h.state.timelineStartMs, moved);
-  h.state.dragging = false; h.state.pendingScrub = { pointerId: 1 }; h.timeupdate(); assert.equal(h.state.timelineStartMs, moved);
-  h.state.pendingScrub = null; h.video.readyState = 0; h.timeupdate(); assert.equal(h.state.timelineStartMs, moved);
+  h.state.dragging = false; h.video.readyState = 0; h.timeupdate(); assert.equal(h.state.timelineStartMs, moved);
 });
 test('marking an offscreen paused point makes the new marker visible without changing the selected time', () => {
   const h = harness(); h.state.timelineStartMs = 0; h.state.cursorMs = 8 * 3600000; h.state.followPlayback = false;

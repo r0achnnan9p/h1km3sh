@@ -8,7 +8,7 @@ Review [source.env.example](../deploy/source.env.example). Copy it to your own G
 
 HIKVISION_ARCHIVE_DIR must be an existing archive directory readable by the app account; grant only read access to original recordings at the operating system level. Give the separate data/download/artifact directories private write access and sufficient disk capacity. HIKVISION_MEDIAMTX_PLAYBACK_URL and HIKVISION_MEDIAMTX_API_URL must be reachable by the source process. Playback and Control API addresses are independent; setting the API URL to an empty string disables API discovery. Protect the [MediaMTX Control API](https://mediamtx.org/docs/features/control-api); never publicly expose9997.
 
-Start on127.0.0.1:30001 with scheduler and automatic API discovery disabled first, as shown in the README. This is the unauthenticated internal API/legacy interface, not the protected PWA. An empty archive or recording gap is not filled from a random DVR.
+Start on127.0.0.1:30001 with scheduler and automatic API discovery disabled first, as shown in the README. This is the unauthenticated internal API and static asset host; its root path returns 404 and it is not the protected PWA. Use the 30002 gateway below for the console. An empty archive or recording gap is not filled from a random DVR.
 
 ## Protected PWA and MCP
 

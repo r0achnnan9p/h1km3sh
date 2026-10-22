@@ -131,9 +131,7 @@ function generateEmbeddedAssetsSnippet() {
 const __EMBEDDED_ASSETS__ = ${JSON.stringify(assets)};
 
 function __serveEmbeddedAssets__(req, res, next) {
-  let urlPath = req.path;
-  if (urlPath === '/') urlPath = '/index.html';
-  const asset = __EMBEDDED_ASSETS__[urlPath];
+  const asset = __EMBEDDED_ASSETS__[req.path];
   if (asset) {
     const buf = Buffer.from(asset.content, 'base64');
     res.setHeader('Content-Type', asset.mime);
@@ -182,10 +180,13 @@ function bundleAndPatch(assetsSnippet) {
     'app.use(__serveEmbeddedAssets__)'
   );
 
-  // Patch 3: make downloads dir relative to exe location (not __dirname which is virtual in SEA)
+  // Patch 3: __dirname is virtual inside a single executable, so the default
+  // downloads dir must be relative to the exe location. Only rewrite the
+  // __dirname-based join; the HIKVISION_DOWNLOADS_DIR override from the source
+  // must stay intact.
   code = code.replace(
-    /var downloadsDir = [^;]*join\([^"]*"downloads"\)/,
-    `var downloadsDir = require("path").join(require("path").dirname(process.execPath), "downloads")`
+    /join\(__dirname\d*, "downloads"\)/,
+    'join(require("path").dirname(process.execPath), "downloads")'
   );
 
   const finalCode = assetsSnippet + '\n' + code;

@@ -33,11 +33,10 @@ test('direct source changes dispatch exactly the canonical source or recorder ev
  h.nodes['quick-source-select'].value='dvr:missing';h.ctx.changeQuickPlaybackSource();assert.equal(h.nodes['dvr-select'].value,'a');
  h.nodes['quick-source-select'].value='mediamtx';h.ctx.changeQuickPlaybackSource();assert.equal(h.nodes['playback-source'].value,'mediamtx');assert.equal(h.nodes['playback-source'].events.length,2);
 });
-test('date opens only its calendar; recovery focuses direct source controls with no long sheet',()=>{
+test('date opens only its calendar without a long playback sheet',()=>{
  const h=harness();let calendar;h.ctx.openCalendar=value=>{calendar=value;};
  h.ctx.openPlaybackDate();assert.equal(calendar.value,'2026-10-01');assert.equal(calendar.description,'');
  calendar.onSelect('2026-09-30');assert.equal(h.nodes['date-select'].value,'2026-09-30');assert.deepEqual(h.nodes['date-select'].events,['change']);
- h.ctx.openPlaybackConfiguration();assert.equal(h.nodes['quick-source-select'].focused,true);
  assert.ok(!script.includes("openDialog('回放选择'"));
 });
 test('top camera picker disables when source has no available channels',()=>{
