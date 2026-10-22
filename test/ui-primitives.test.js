@@ -47,10 +47,8 @@ test('brand, favicon, Apple touch and PWA manifest share the selected v2 icon', 
   assert.match(html, /href="\/camera\/site-v2\.webmanifest"/); assert.doesNotMatch(html, /class="workspace-logo"[^>]*>h</);
   const manifest = JSON.parse(fs.readFileSync(new URL('../public/site-v2.webmanifest', import.meta.url), 'utf8'));
   assert.deepEqual(manifest.icons.map(icon => icon.sizes), ['192x192', '512x512', 'any']);
-  for (const filename of ['site.webmanifest', 'site-v1.webmanifest', 'site-v2.webmanifest']) {
-    const install = JSON.parse(fs.readFileSync(new URL('../public/' + filename, import.meta.url), 'utf8'));
-    assert.equal(install.name, 'H1kM3sh'); assert.equal(install.short_name, 'H1kM3sh');
-  }
+  const install = JSON.parse(fs.readFileSync(new URL('../public/site-v2.webmanifest', import.meta.url), 'utf8'));
+  assert.equal(install.name, 'H1kM3sh'); assert.equal(install.short_name, 'H1kM3sh');
   for (const icon of manifest.icons) assert.ok(!icon.purpose || icon.purpose === 'any');
   for (const [name, size] of [['console-icon-v2-192.png', 192], ['console-icon-v2-512.png', 512], ['apple-touch-icon-v2.png', 180]]) {
     const bytes = fs.readFileSync(new URL('../public/' + name, import.meta.url));

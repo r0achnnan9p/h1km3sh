@@ -51,7 +51,7 @@ const APP_BASE_PATH = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const appPath = value => `${APP_BASE_PATH}${value.startsWith('/') ? value : `/${value}`}`;
 // Task telemetry timestamps are server time. Keep the offset so a skewed
 // device clock cannot hide a fresh transfer rate.
-const state = { cameras: [], dvrs: [], segments: [], outputs: [], tasks: [], uploads: [], serverClockOffset: 0, outputSort: 'newest', selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', previewMode: 'replay', date: '', cursorMs: null, inMs: null, outMs: null, timelineSpanSeconds: DEFAULT_TIMELINE_SPAN_SECONDS, timelineStartMs: null, dragging: false, dragSource: '', dragPointerId: null, playRequestId: 0, segmentRequestId: 0, dvrChannelRequestId: 0, playbackAutoplay: false, playbackFormats: [], playFormat: '', playBounds: null, followPlayback: false, scrubFadeTimer: null, busy: false, source: null, lastTasks: '' };
+const state = { cameras: [], dvrs: [], segments: [], outputs: [], tasks: [], uploads: [], serverClockOffset: 0, outputSort: 'newest', selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', previewMode: 'replay', date: '', cursorMs: null, inMs: null, outMs: null, timelineSpanSeconds: DEFAULT_TIMELINE_SPAN_SECONDS, timelineStartMs: null, dragging: false, playRequestId: 0, segmentRequestId: 0, dvrChannelRequestId: 0, playbackAutoplay: false, playbackFormats: [], playFormat: '', playBounds: null, followPlayback: false, scrubFadeTimer: null, busy: false, source: null, lastTasks: '' };
 const shanghai = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' });
 const dateParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
 let toastTimer, clockTimer;
@@ -625,7 +625,7 @@ function updateCursor() {
   }
   // Playback, keyboard seeks and window drags share one centred time. Marker
   // drags retain their grip mapping until release, then recenter as normal.
-  if (state.previewMode !== 'live' && state.cursorMs !== null && state.date && !state.dragBoundary) {
+  if (state.previewMode !== 'live' && state.cursorMs !== null && state.date) {
     const span = timelineWindow().span;
     const start = span === 86_400_000 ? dateStart(state.date) : clampTimelineCenter(state.cursorMs) - span / 2;
     if (state.timelineStartMs !== start) { state.timelineStartMs = start; renderTimeline(); return; }
@@ -671,37 +671,12 @@ function updateBoundaryControls() {
     if (!handle.hidden) { handle.style.left = `${timelinePercent(ms, window.start, window.span)}%`; handle.setAttribute('aria-valuenow', String((ms - day) / 1000)); handle.setAttribute('aria-valuetext', boundaryLabel(ms)); }
   }
 }
-function focusBoundary(boundary) {
-  const ms = state[boundary === 'in' ? 'inMs' : 'outMs'];
-  if (ms === null) return;
-  setTimelineWindow(ms);
-  // Existing copy streams start near the requested boundary, not a frame-accurate seek.
-  Promise.resolve(jumpToTimelineTime(ms, 'detail', { autoplay: !$('replay-player').hidden && !$('replay-player').paused })).catch(error => setPlaybackNotice(error.message, true));
-}
 function playbackContextKey() {
   return JSON.stringify([state.date, state.playbackSource, state.playbackSelectionVersion || 0, state.configRevision,
     state.playbackSource === 'dvr' ? [$('dvr-select').value, $('dvr-channel').value] : state.selectedCamera]);
 }
 function requirePlaybackContext(key) {
   if (key !== playbackContextKey()) throw new Error('日期或录像来源已改变，请重新打开时间编辑。');
-}
-function openBoundaryEditor(boundary) {
-  const original = state[boundary === 'in' ? 'inMs' : 'outMs'];
-  if (original === null) { openRangeEditor(); return; }
-  const context = playbackContextKey(), date = state.date;
-  const sheet = openDialog(boundary === 'in' ? '调整入点' : '调整出点', `${date} · 北京时间`);
-  const input = enhanceTimeInput(labelledInput(sheet.content, '时间', boundaryLabel(original), { placeholder: '201530 → 20:15:30', maxLength: 8 }));
-  const steps = document.createElement('div'); steps.className = 'boundary-steps'; sheet.content.append(steps);
-  const read = () => { requirePlaybackContext(context); return rangeTimeMs(input.value, date, boundary === 'out'); };
-  for (const seconds of [-10, -1, 1, 10]) addButton(steps, `${seconds > 0 ? '+' : '−'}${Math.abs(seconds)} 秒`, 'quiet-button', () => {
-    try { input.value = boundaryLabel(clampBoundaryTime(read() + seconds * 1000, boundary)); sheet.error.textContent = ''; input.dispatchEvent(new Event('input', { bubbles: true })); } catch (error) { sheet.error.textContent = error.message; }
-  });
-  if (state.cursorMs !== null) addButton(sheet.content, '用当前定位时间', 'quiet-button', () => { if (context !== playbackContextKey()) { sheet.error.textContent = '日期或录像来源已改变，请重新打开时间编辑。'; return; } input.value = boundaryLabel(clampBoundaryTime(state.cursorMs, boundary)); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  addButton(sheet.actions, '定位原时间', 'quiet-button', () => { if (context !== playbackContextKey()) { sheet.error.textContent = '日期或录像来源已改变，请重新打开时间编辑。'; return; } sheet.close(); focusBoundary(boundary); });
-  addButton(sheet.actions, '应用并定位', 'primary-button', () => {
-    try { const value = read(); if (clampBoundaryTime(value, boundary) !== value) throw new Error('开始必须早于结束，至少保留 1 秒。'); state[boundary === 'in' ? 'inMs' : 'outMs'] = value; updateSelection(); sheet.close(); focusBoundary(boundary); } catch (error) { sheet.error.textContent = error.message; }
-  });
-  input.focus(); input.select();
 }
 function updateSelection() {
   const overlay = $('range-overlay'); const inMs = state.inMs, outMs = state.outMs;
@@ -1088,14 +1063,6 @@ async function toggleReplayPlayback() {
   }
   syncReplayToggle();
 }
-function timeAtTimeline(event, overview = false, clamp = true) {
-  const rect = $(overview ? 'timeline-overview' : 'timeline').getBoundingClientRect();
-  const rawRatio = (event.clientX - rect.left) / rect.width;
-  const ratio = clamp ? Math.max(0, Math.min(1, rawRatio)) : rawRatio;
-  if (overview) return dateStart(state.date) + ratio * 86_400_000;
-  const window = timelineWindow();
-  return window.start + ratio * window.span;
-}
 function updateTimelineHover(event) {
   const marker = $('timeline-hover');
   if (!marker) return;
@@ -1116,7 +1083,7 @@ for (const event of ['pointerdown', 'pointerleave']) $('timeline-overview').addE
 setupPrecisionTimeline();
 function setupPrecisionTimeline() {
   let snapshot = null;
-  const finish = () => { state.dragging = false; state.dragSource = ''; $('timeline-overview').dataset.dragging = 'false'; fadeScrubTime(); };
+  const finish = () => { state.dragging = false; $('timeline-overview').dataset.dragging = 'false'; fadeScrubTime(); };
   precisionTimeline = createPrecisionTimeline({
     element: $('timeline-overview'),
     getTime: () => state.segments.length ? state.cursorMs ?? dateStart(state.date) : NaN,
@@ -1126,7 +1093,7 @@ function setupPrecisionTimeline() {
     onStart: () => {
       // Ruler gestures own only the candidate position, never the marked range.
       snapshot = { cursorMs: state.cursorMs, timelineStartMs: state.timelineStartMs };
-      state.dragging = true; state.dragSource = 'overview'; $('timeline-overview').dataset.dragging = 'true';
+      state.dragging = true; $('timeline-overview').dataset.dragging = 'true';
       const video = $('replay-player'); if (!video.hidden && !video.paused) video.pause();
     },
     onMove: ({ time }) => {
@@ -1150,156 +1117,10 @@ function showScrubTime(ms, context = '') {
   $('scrub-time-value').textContent = fullTime.slice(11);
   $('scrub-date-value').textContent = fullTime.slice(0, 10);
   clearTimeout(state.scrubFadeTimer); overlay.classList.add('visible');
-  const magnifier = $('trim-magnifier');
-  document.body.classList.toggle('trimming', Boolean(state.dragBoundary));
-  document.body.dataset.trimBoundary = state.dragBoundary || '';
-  if (magnifier) {
-    magnifier.hidden = !state.dragBoundary;
-    if (state.dragBoundary) {
-      const rect = $('timeline').getBoundingClientRect();
-      magnifier.style.left = `${Math.max(60, Math.min(window.innerWidth - 60, rect.left + timelinePercent(ms, timelineWindow().start, timelineWindow().span) / 100 * rect.width))}px`;
-      magnifier.style.top = `${Math.max(8, rect.top - 124)}px`;
-      $('trim-magnifier-time').textContent = boundaryLabel(ms);
-      magnifier.style.setProperty('--trim-second', String(Math.round(ms / 1000) % 10));
-      const seconds = $('trim-magnifier-seconds');
-      if (seconds) seconds.textContent = [-4, -2, 0, 2, 4].map(offset => String((Math.round(ms / 1000) + offset + 60) % 60).padStart(2, '0')).join('  ');
-    }
-  }
 }
 function fadeScrubTime() {
-  document.body.classList.remove('trimming');
-  const magnifier = $('trim-magnifier'); if (magnifier) magnifier.hidden = true;
   clearTimeout(state.scrubFadeTimer);
   state.scrubFadeTimer = setTimeout(() => $('scrub-time-overlay').classList.remove('visible'), 420);
-}
-function scrubSnapshot() {
-  return { cursorMs: state.cursorMs, inMs: state.inMs, outMs: state.outMs, timelineStartMs: state.timelineStartMs };
-}
-function beginTimelineScrub(event, source) {
-  if (event.isPrimary === false || !state.segments.length || state.dragging || state.pendingScrub || (event.button !== undefined && event.button !== 0)) return;
-  const boundary = event.target?.closest?.('[data-boundary]')?.dataset.boundary || '';
-  const markedTime = state[boundary === 'in' ? 'inMs' : 'outMs'];
-  const offsetMs = boundary && markedTime !== null ? timeAtTimeline(event, source === 'overview', false) - markedTime : 0;
-  const view = timelineWindow(), center = view.start + view.span / 2;
-  const overviewPoint = source === 'overview' ? timeAtTimeline(event, true, false) : center;
-  const anchorCenter = source === 'overview' && (overviewPoint < view.start || overviewPoint > view.end) ? overviewPoint : center;
-  const width = event.currentTarget.getBoundingClientRect?.().width || $(source === 'overview' ? 'timeline-overview' : 'timeline').getBoundingClientRect().width;
-  const gesture = { anchorCenter, width, pointerId: event.pointerId, source, boundary, autoplay: !$('replay-player').hidden && !$('replay-player').paused, offsetMs, x: event.clientX, y: event.clientY, snapshot: scrubSnapshot() };
-  if (event.pointerType === 'touch' || source === 'detail' && !boundary) { state.pendingScrub = gesture; return; }
-  activateTimelineScrub(event, gesture);
-}
-function activateTimelineScrub(event, gesture) {
-  state.pendingScrub = null; state.dragAutoplay = gesture.autoplay; state.dragging = true; state.dragSource = gesture.source; state.dragBoundary = gesture.boundary; state.dragPointerId = gesture.pointerId; state.scrubSnapshot = gesture.snapshot; state.dragOffsetMs = gesture.offsetMs; state.dragTarget = event.currentTarget; state.dragOriginX = gesture.x; state.dragOriginY = gesture.y; state.dragMoved = false; state.dragAnchorCenter = gesture.anchorCenter; state.dragWidth = gesture.width;
-  const video = $('replay-player'); if (!video.hidden && !video.paused) video.pause();
-  // A touch tap activates on pointerup, when capture may already be unavailable.
-  if (event.type !== 'pointerup') { try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch {} }
-  moveTimelineScrub(event, gesture.source);
-}
-function clampBoundaryTime(ms, boundary, inMs = state.inMs, outMs = state.outMs) {
-  const day = dateStart(state.date), second = Math.round(ms / 1000) * 1000;
-  const limit = timelineLimit();
-  const minimum = boundary === 'out' && inMs !== null ? inMs + 1000 : day;
-  const maximum = Math.min(limit, boundary === 'in' ? (outMs !== null ? outMs - 1000 : day + 86_399_000) : day + 86_400_000);
-  return Math.max(day, Math.min(maximum, Math.max(minimum, second)));
-}
-function moveTimelineScrub(event, source) {
-  const pending = state.pendingScrub;
-  if (pending && pending.pointerId === event.pointerId && pending.source === source) {
-    const dx = Math.abs(event.clientX - pending.x), dy = Math.abs(event.clientY - pending.y);
-    if (dy > 8 && dy > dx) { state.pendingScrub = null; return; }
-    if (dx < 8) return;
-    activateTimelineScrub(event, pending); return;
-  }
-  if (!state.dragging || state.dragPointerId !== event.pointerId || state.dragSource !== source) return;
-  state.dragClientX = event.clientX;
-  if (Math.abs(event.clientX - state.dragOriginX) >= 8) state.dragMoved = true;
-  const rawPoint = timeAtTimeline(event, source === 'overview', false) - (state.dragOffsetMs || 0);
-  const window = source === 'overview' ? { start: dateStart(state.date), end: dateStart(state.date) + 86_400_000 } : timelineWindow();
-  const point = Math.max(window.start, Math.min(window.end, timelineLimit(), rawPoint));
-  if (state.dragBoundary) {
-    const boundary = state.dragBoundary, ms = clampBoundaryTime(point, boundary);
-    state[boundary === 'in' ? 'inMs' : 'outMs'] = ms; state.cursorMs = Math.min(ms, timelineLimit(), dateStart(state.date) + 86_399_999);
-    updateCursor(); updateSelection(); showScrubTime(ms, boundary === 'in' ? '调整开始时间' : '调整结束时间');
-  } else {
-    // Move the window, never the needle: detail follows the dragged content,
-    // overview follows the grabbed hour box without snapping its centre to a finger.
-    const delta = (event.clientX - state.dragOriginX) / state.dragWidth;
-    const center = state.dragAnchorCenter + delta * (source === 'overview' ? 86_400_000 : -timelineWindow().span);
-    state.cursorMs = clampTimelineCenter(Math.round(center / 1000) * 1000);
-    setTimelineWindow(state.cursorMs);
-    showScrubTime(state.cursorMs);
-  }
-  if (source === 'detail' && state.dragBoundary && state.dragMoved && event.type !== 'pointerup') scheduleTimelinePan();
-  event.preventDefault();
-}
-// The held pointer stays at the same timestamp-to-pixel mapping as the window moves.
-// No video requests occur on animation frames: release commits exactly one seek.
-function timelinePanVelocity(clientX, rect) {
-  const edge = Math.min(64, rect.width * 0.12);
-  const x = clientX - rect.left;
-  const strength = x < edge ? -Math.min(1, (edge - x) / edge) : x > rect.width - edge ? Math.min(1, (x - rect.width + edge) / edge) : 0;
-  // Up to a tenth of the visible window per second, scaled with the zoom level.
-  return strength * Math.abs(strength) * timelineWindow().span / 10;
-}
-function stopTimelinePan() {
-  if (state.panFrame != null) cancelAnimationFrame(state.panFrame);
-  state.panFrame = null; state.panLastTime = null;
-}
-function scheduleTimelinePan() {
-  if (state.panFrame != null || !state.dragging || state.dragSource !== 'detail' || !state.dragMoved || !state.dragBoundary) return;
-  const velocity = timelinePanVelocity(state.dragClientX, $('timeline').getBoundingClientRect());
-  if (!velocity) { state.panLastTime = null; return; }
-  state.panFrame = requestAnimationFrame(advanceTimelinePan);
-}
-function advanceTimelinePan(now) {
-  state.panFrame = null;
-  if (!state.dragging || state.dragSource !== 'detail' || document.hidden) { stopTimelinePan(); return; }
-  const elapsed = state.panLastTime == null ? 0 : Math.max(0, Math.min(50, now - state.panLastTime));
-  state.panLastTime = now;
-  const velocity = timelinePanVelocity(state.dragClientX, $('timeline').getBoundingClientRect());
-  const window = timelineWindow(), day = dateStart(state.date);
-  const start = Math.max(day, Math.min(Math.max(day, timelineLimit() - window.span), window.start + velocity * elapsed / 1000));
-  // Do not scroll a constrained marker away past its opposite endpoint.
-  const blocked = state.dragBoundary === 'in' && velocity > 0 && state.outMs !== null && state.inMs >= state.outMs - 1000
-    || state.dragBoundary === 'out' && velocity < 0 && state.inMs !== null && state.outMs <= state.inMs + 1000;
-  if (blocked || !velocity || elapsed && start === window.start) { stopTimelinePan(); return; }
-  if (start !== window.start) {
-    state.timelineStartMs = start;
-    moveTimelineScrub({ clientX: state.dragClientX, pointerId: state.dragPointerId, type: 'panframe', preventDefault() {} }, 'detail');
-    renderTimeline();
-  }
-  scheduleTimelinePan();
-}
-async function endTimelineScrub(event, source) {
-  const pending = state.pendingScrub;
-  if (pending && pending.pointerId === event.pointerId && pending.source === source) {
-    const dx = Math.abs(event.clientX - pending.x), dy = Math.abs(event.clientY - pending.y);
-    if (dy > 8 && dy > dx || source === 'detail' && !pending.boundary && dx < 8) { state.pendingScrub = null; return; }
-    activateTimelineScrub(event, pending);
-  }
-  if (!state.dragging || state.dragPointerId !== event.pointerId || state.dragSource !== source) return;
-  stopTimelinePan();
-  // Release must not re-read pointerup coordinates: the last pointermove is what the user saw.
-  moveTimelineScrub({ clientX: state.dragClientX ?? event.clientX, pointerId: event.pointerId, type: 'pointerup', preventDefault() {} }, source);
-  const time = state.cursorMs, targetSource = state.dragSource, autoplay = state.dragBoundary ? state.dragAutoplay : true;
-  state.dragging = false; state.dragSource = ''; state.dragBoundary = ''; state.dragPointerId = null; state.scrubSnapshot = null; state.dragOffsetMs = 0; state.dragTarget = null;
-  if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  fadeScrubTime();
-  try { await jumpToTimelineTime(time, targetSource, { autoplay }); } catch (error) { setPlaybackNotice(error.message, true); }
-  event.preventDefault();
-}
-function cancelTimelineScrub(event) {
-  // Transferring touch capture from a child handle emits a bubbling loss there.
-  // Only loss of the timeline's own capture cancels the active drag.
-  if (event.type === 'lostpointercapture' && event.target !== state.dragTarget) return;
-  if (state.pendingScrub?.pointerId === event.pointerId) state.pendingScrub = null;
-  if (!state.dragging || state.dragPointerId !== event.pointerId) return;
-  stopTimelinePan();
-  const target = state.dragTarget;
-  if (state.scrubSnapshot) Object.assign(state, state.scrubSnapshot);
-  state.dragging = false; state.dragSource = ''; state.dragBoundary = ''; state.dragPointerId = null; state.scrubSnapshot = null; state.dragOffsetMs = 0; state.dragTarget = null;
-  if (target?.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId);
-  renderTimeline(); fadeScrubTime(); setPlaybackNotice('已取消调整，保留原来的时间。');
 }
 function jumpToTimelineTime(ms, source = 'detail', options = {}) {
   const day = dateStart(state.date);
@@ -1421,9 +1242,9 @@ function finishBufferedReplaySeek() {
 // Lifecycle interruption must never commit a preview or leave an animation running.
 function interruptTimelineScrub() {
   precisionTimeline?.cancel();
-  state.pendingScrub = null;
-  if (state.dragging) cancelTimelineScrub({ pointerId: state.dragPointerId });
-  else stopTimelinePan();
+  state.dragging = false;
+  $('timeline-overview').dataset.dragging = 'false';
+  fadeScrubTime();
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) interruptTimelineScrub(); });
 window.addEventListener('blur', interruptTimelineScrub);
@@ -1468,7 +1289,7 @@ function syncPlaybackCursor() {
   const video = $('replay-player'), bounds = state.playBounds;
   // A picked time remains authoritative while a new stream is loading or fails.
   // Only a stream that actually started playing may advance the shared cursor.
-  if (bounds?.sdkTimingUnknown || state.pendingHlsStart || state.previewMode === 'live' || (state.playFormat === 'hls' && state.hlsStopped) || state.dragging || state.holdSeek || state.pendingScrub || state.pendingLocalSeek || !state.followPlayback || !bounds || video.hidden || video.error || video.seeking || video.readyState < 2 || video.currentSrc !== video.src || !Number.isFinite(video.currentTime)) return;
+  if (bounds?.sdkTimingUnknown || state.pendingHlsStart || state.previewMode === 'live' || (state.playFormat === 'hls' && state.hlsStopped) || state.dragging || state.holdSeek || state.pendingLocalSeek || !state.followPlayback || !bounds || video.hidden || video.error || video.seeking || video.readyState < 2 || video.currentSrc !== video.src || !Number.isFinite(video.currentTime)) return;
   state.cursorMs = Math.min(bounds.start + Math.max(0, video.currentTime) * 1000, bounds.start + bounds.duration * 1000, dateStart(state.date) + 86400000);
   // Natural playback keeps the full day fixed; only local windows follow the
   // exact media clock beneath their centre needle.
@@ -1481,7 +1302,7 @@ function syncPlaybackCursor() {
 // or five quick taps on the 选中片段 heading (works in a standalone PWA); output also goes to an on-screen panel.
 function debugMark(event, detail = {}) {
   if (typeof document === 'undefined' || !document.getElementById('debug-mark-panel')) return;
-  const fields = ['id', 'disabled', 'dragging', 'pendingScrub', 'boundary', 'inMs', 'outMs', 'followPlayback', 'ms', 'source', 'point', 'other', 'jumpInFlight'];
+  const fields = ['id', 'disabled', 'dragging', 'boundary', 'inMs', 'outMs', 'followPlayback', 'ms', 'source', 'point', 'other', 'jumpInFlight'];
   const safeDetail = Object.fromEntries(Object.entries(detail).filter(([key]) => fields.includes(key)));
   const line = JSON.stringify({ event, t: Date.now() % 100000, cursorMs: state.cursorMs, jumpInFlight: state.jumpInFlight || 0, ...safeDetail });
   console.log('[debugMark]', line);
@@ -1489,7 +1310,7 @@ function debugMark(event, detail = {}) {
   if (panel) panel.textContent = [line, ...panel.textContent.split('\n')].slice(0, 16).join('\n');
 }
 function markPlaybackBoundary(boundary) {
-  debugMark('mark-click', { boundary, inMs: state.inMs, outMs: state.outMs, dragging: state.dragging, pendingScrub: Boolean(state.pendingScrub), followPlayback: state.followPlayback });
+  debugMark('mark-click', { boundary, inMs: state.inMs, outMs: state.outMs, dragging: state.dragging, followPlayback: state.followPlayback });
   if (state.playBounds?.sdkTimingUnknown) { setPlaybackNotice('SDK 无法按当前帧标记，请手填导出时间。', true); return; }
   if (state.previewMode === 'live') return;
   syncPlaybackCursor();
@@ -1510,7 +1331,7 @@ $('mark-in').addEventListener('click', () => markPlaybackBoundary('in'));
 $('mark-out').addEventListener('click', () => markPlaybackBoundary('out'));
 $('clear-marks').addEventListener('click', () => {
   interruptTimelineScrub();
-  state.pendingScrub = null; clearMarkedRange(); updateSelection();
+  clearMarkedRange(); updateSelection();
 });
 function changeReplayDay(delta) {
   const date = new Date(`${$('date-select').value}T12:00:00Z`); if (!Number.isFinite(date.getTime())) return;
@@ -1906,29 +1727,6 @@ function taskCreatedAt(task) {
     if (Number.isFinite(ms) && ms > 0 && ms <= 8640000000000000) return ms;
   }
   return 0;
-}
-const removedRecordsExpanded = { uploads: false };
-function appendTasksByTime(list, tasks, uploadTask) {
-  let removed;
-  // sort() is stable, preserving API order for legacy tasks without timestamps.
-  for (const task of [...tasks].sort((left, right) => taskCreatedAt(right) - taskCreatedAt(left))) {
-    const card = makeTaskCard(task, uploadTask), createdAt = taskCreatedAt(task);
-    if (createdAt) {
-      const time = document.createElement('time'); time.className = 'task-created-at'; time.dateTime = new Date(createdAt).toISOString();
-      time.textContent = new Date(createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-      time.title = `${task.retryRequestedAt ? '重试于' : '创建于'} ${new Date(createdAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}（北京时间）`;
-      time.setAttribute('aria-label', time.title); card.append(time);
-    }
-    if (uploadTask && task.archivedAt) {
-      if (!removed) {
-        removed = document.createElement('details'); removed.className = 'removed-records'; removed.open = removedRecordsExpanded.uploads;
-        const summary = document.createElement('summary'); summary.textContent = `已移除记录 · ${tasks.filter(item => item.archivedAt).length}`; removed.append(summary);
-        removed.addEventListener('toggle', () => { if (removed.isConnected) removedRecordsExpanded.uploads = removed.open; });
-      }
-      removed.append(card);
-    } else list.append(card);
-  }
-  if (removed) list.append(removed);
 }
 function makeTaskCard(task, uploadTask) {
   if (!uploadTask && task.kind === 'dvr-http-sample') return makeDvrHttpSampleCard(task);
@@ -2883,13 +2681,6 @@ function openPlaybackDate() {
   return openCalendar({ value: $('date-select').value || state.date, today, description: '', onSelect: value => {
     $('date-select').value = value; $('date-select').dispatchEvent(new Event('change', { bubbles: true }));
   } });
-}
-function openPlaybackConfiguration() {
-  // Existing recovery actions now point to the direct controls, never a second
-  // copy of source/channel/date selectors in an oversized dialog.
-  updatePlaybackContext();
-  $('quick-source-select').scrollIntoView?.({ block: 'nearest' });
-  $('quick-source-select').focus();
 }
 
 function reloadApplication() {

@@ -17,7 +17,7 @@ data/
 implementation_plan.md
 task.md
 walkthrough.md
-.kiro/
+.kiro/specs/
 .vscode/
 .claude/
 

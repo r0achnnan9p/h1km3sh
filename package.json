@@ -2,7 +2,7 @@
   "name": "h1km3sh",
   "version": "0.1.0",
   "description": "Self-hosted MediaMTX/Hikvision recording, playback, MP4 export and MCP console",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
     "test": "node --test",
     "setup:status-password": "node scripts/setup-status-password.js",

@@ -31,7 +31,7 @@ test('fixture serves real shell/assets and exposes only synthetic bootstrap stat
   assert.equal(h.root.headers.get('x-console-fixture'), 'synthetic-in-memory-only');
   assert.match(await (await h.request('/console.js')).text(), /function connectEvents/);
   // 独立工作区位于 .codex 下时，白名单资源也必须能被正常加载。
-  for (const asset of ['console.css', 'touch-controls.css', 'precision-timeline.js', 'precision-scrub.js']) {
+  for (const asset of ['console.css', 'touch-controls.css', 'precision-timeline.js']) {
     const response = await h.request(`/${asset}`);
     assert.equal(response.status, 200, `${asset} 应可加载`);
     assert.match(response.headers.get('content-type'), /css|javascript/);

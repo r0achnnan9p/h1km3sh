@@ -2,7 +2,7 @@ import express from 'express';
 import { mountConsoleConfig, configSnapshot, readPlaybackUrl, preparationGuard, consoleConfigJsonError } from './lib/console-config.js';
 import { cameraSourceIdentity } from './lib/source-identity.js';
 import { probeDevice, snapshotDevice } from './lib/device-probe.js';
-import { deviceHttpOrigin, deviceEndpointIdentity, deviceRtspAuthority, deviceCacheKey, normalizeDeviceEndpoint } from './lib/device-endpoint.js';
+import { deviceHttpOrigin, deviceEndpointIdentity, deviceCacheKey, normalizeDeviceEndpoint } from './lib/device-endpoint.js';
 import { listenerConfig } from './lib/listener-config.js';
 import { execFile } from 'child_process';
 import { spawnExportProcess as spawn } from './lib/export-process-lock.js';
@@ -18,7 +18,6 @@ import { ffmpegPath, ffprobePath } from './lib/ffmpeg-paths.js';
 import { getLanAddresses } from './lib/lan-address.js';
 import { runServiceCli } from './lib/service-manager.js';
 import { writeRuntimeFile, registerRuntimeCleanup } from './lib/runtime-file.js';
-import { runParallelDownload } from './lib/parallel-download.js';
 import { runMp4DownloadPipeline, compactToIso } from './lib/mp4-download-pipeline.js';
 import { searchRecordings } from './lib/recording-search.js';
 import { runRtspClipExport, compactToMs, msToCompact } from './lib/rtsp-clip-export.js';
@@ -40,7 +39,7 @@ import { createScheduler } from './lib/scheduler.js';
 import { getSchedules, getScheduleFilePath, updateSchedule, recordRun } from './lib/schedule-store.js';
 import { mountOutputThumbnails } from './lib/output-thumbnails.js';
 import { listOutputFiles, deleteOutputFile, isOutputFilename } from './lib/output-files.js';
-import { listOutputLibrary, resolveLibraryOutput, deleteLibraryOutput, createOutputAlias, outputId, captureOutputSource, outputSourceUnchanged } from './lib/output-library.js';
+import { listOutputLibrary, resolveLibraryOutput, deleteLibraryOutput, outputId, captureOutputSource, outputSourceUnchanged } from './lib/output-library.js';
 import { listDvrCache, cleanCompletedDvrCache } from './lib/cache-cleaner.js';
 import { createUploadQueue } from './lib/match-workflow.js';
 import { mountCloud189Verification } from './lib/cloud189-verification.js';
@@ -312,13 +311,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// Per-IP RTSP path hint: maps device IP -> 'channels' | 'tracks'.
-// Most Hikvision NVRs require the /Streaming/tracks/ path for playback seeks
-// (see the preview endpoint), so we default to 'tracks' when an IP is not
-// present in the cache. This map is consulted by the single-stream RTSP
-// export path; it is safe (and intentional) for it to start empty.
-const devicePathCache = new Map();
 
 function broadcastProgress(taskId, status, progress, message) {
   const current = activeTasks.get(taskId);
@@ -935,15 +927,6 @@ app.post(['/api/export/stop', '/console/api/export/stop'], (req, res) => {
   console.log(`[${taskId}] Task stopped by user`);
   res.json({ success: true, message: 'Task stopped' });
 });
-
-// Helper to convert HH:MM:SS to seconds
-function parseTimeStr(timeStr) {
-  const parts = timeStr.split(':');
-  if (parts.length === 3) {
-    return parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseFloat(parts[2]);
-  }
-  return 0;
-}
 
 // 4. Export Video
 /**
@@ -1697,18 +1680,15 @@ function startExportTask(options) {
   try { normalizeDeviceEndpoint({ ip, httpPort, rtspPort }); } catch { return { ok: false, status: 400, error: '录像机地址或端口无效。' }; }
   const method = options.method || 'rtspclip';
 
-  // Parse optional parallel download parameters with defaults and validation
-  const parallel = options.parallel !== undefined ? Boolean(options.parallel) : true;
   const concurrency = Math.max(1, Math.min(8, parseInt(options.concurrency, 10) || 4));
-  const segmentDuration = Math.max(30, parseInt(options.segmentDuration, 10) || 300);
 
-  console.log(`[API] Export request: ${ip}, channel ${channel}, from ${startTime} to ${endTime} (method=${method}, parallel=${parallel}, concurrency=${concurrency}, segmentDuration=${segmentDuration})`);
+  console.log(`[API] Export request: ${ip}, channel ${channel}, from ${startTime} to ${endTime} (method=${method}, concurrency=${concurrency})`);
 
   if (!ip || !user || !pass || !channel || !startTime || !endTime) {
     return { ok: false, status: 400, error: 'Missing parameters' };
   }
 
-  if (!['rtspclip', 'mp4download', 'rtsp'].includes(method)) {
+  if (!['rtspclip', 'mp4download'].includes(method)) {
     return { ok: false, status: 400, error: 'Unsupported export method' };
   }
   if (!CHANNEL_PATTERN.test(String(channel))) {
@@ -1735,7 +1715,7 @@ function startExportTask(options) {
   }
 
   // 旧 MCP export_clip 和 Web 导出也先查已完成的同区间录像，避免重复拉取数小时。
-  if (!reservation && !options[RECOVERED_TASK] && method !== 'rtsp') {
+  if (!reservation && !options[RECOVERED_TASK]) {
     try {
       const mapped = cameraCatalog().filter(camera => camera.deviceId).map(camera => ({ camera, device: getDeviceById(camera.deviceId) })).find(({ camera, device }) =>
         device && String(camera.channel) === String(channel) && deviceEndpointIdentity(device) === deviceEndpointIdentity({ ip, httpPort, rtspPort }) && (!deviceId || device.id === deviceId) && device.username === user && device.password === pass);
@@ -1751,7 +1731,7 @@ function startExportTask(options) {
   const relativeOutput = path.relative(downloadsDir, path.join(reservation?.outputDir || downloadsDir, `${baseFilename}.mp4`));
   if (outputRenames.isBusy(relativeOutput)) return { ok: false, status: 409, error: '目标文件名有未完成的改名记录，暂不重新导出。' };
   if (!reservation) {
-    const requestKey = crypto.createHash('sha256').update(JSON.stringify({ ip, httpPort, rtspPort, deviceId, user, pass, channel: String(channel), startTime, endTime, method, parallel, concurrency, segmentDuration })).digest('hex');
+    const requestKey = crypto.createHash('sha256').update(JSON.stringify({ ip, httpPort, rtspPort, deviceId, user, pass, channel: String(channel), startTime, endTime, method, concurrency })).digest('hex');
     const duplicate = activeTasks.get(exportQueue.find(requestKey)?.taskId);
     if (duplicate) return { ok: true, taskId: duplicate.taskId, filename: duplicate.filename, method,
       status: duplicate.status, queuePosition: duplicate.queuePosition };
@@ -1759,7 +1739,7 @@ function startExportTask(options) {
     const taskId = recovered?.task.taskId || crypto.randomUUID(), controller = new AbortController();
     const task = { taskId, managedExport: true, kind: 'clip', requestKey, controller, source: 'hikvision', channel: String(channel), start: compactToDisplay(startTime), end: compactToDisplay(endTime), queuedAt: recovered?.task.queuedAt || Date.now(), recovered: Boolean(recovered), filename: `${baseFilename}.mp4`, startTime: Date.now(), status: 'queued', progress: null };
     const device = getAllDevices().devices.find(device => deviceEndpointIdentity(device) === deviceEndpointIdentity({ ip, httpPort, rtspPort }) && (!deviceId || device.id === deviceId) && device.username === user && device.password === pass);
-    const request = recovered?.request || { type: 'legacy', deviceId: device?.id, endpoint: deviceEndpointIdentity({ ip, httpPort, rtspPort }), options: { httpPort, rtspPort, deviceId, channel: String(channel), startTime, endTime, method, parallel, concurrency, segmentDuration } };
+    const request = recovered?.request || { type: 'legacy', deviceId: device?.id, endpoint: deviceEndpointIdentity({ ip, httpPort, rtspPort }), options: { httpPort, rtspPort, deviceId, channel: String(channel), startTime, endTime, method, concurrency } };
     try { if (!recovered) recoveryStore.admit(task, request); }
     catch { return { ok: false, status: 503, error: '无法保存导出请求，请检查数据目录权限或磁盘空间；任务未启动。' }; }
     activeTasks.set(taskId, task);
@@ -1908,25 +1888,6 @@ function startExportTask(options) {
     return result;
   }
 
-  // --- RTSP-based pipelines (existing logic, backward compatible) ---
-  // Parse total duration for progress calculation
-  const startD = new Date(startTime.slice(0,4) + '-' + startTime.slice(4,6) + '-' + startTime.slice(6,11) + ':' + startTime.slice(11,13) + ':' + startTime.slice(13,16));
-  const endD = new Date(endTime.slice(0,4) + '-' + endTime.slice(4,6) + '-' + endTime.slice(6,11) + ':' + endTime.slice(11,13) + ':' + endTime.slice(13,16));
-  const totalSeconds = (endD - startD) / 1000;
-
-  // Even the legacy pipeline owns the same lease through its fallback and cleanup.
-  const signal = reservation.controller.signal;
-  result[TASK_COMPLETION] = (async () => {
-    if (parallel && totalSeconds > 60) {
-      const downloaded = await runParallelDownload({ ip, httpPort, rtspPort, deviceId, user, pass, channel, startTime, endTime,
-        concurrency, segmentDuration, taskId, sseClients: [], outputDir: reservation.outputDir || downloadsDir, baseFilename, signal });
-      if (signal.aborted) throw new Error('任务已取消');
-      if (!downloaded.fallback) return downloaded.filePath;
-    }
-    return await runSingleStreamExport({ taskId, ip, httpPort, rtspPort, deviceId, user, pass, channel, startTime, endTime, totalSeconds, baseFilename, signal, outputDir: reservation.outputDir || downloadsDir });
-  })();
-  result[TASK_COMPLETION].catch(() => {});
-
   return result;
 }
 
@@ -1953,69 +1914,6 @@ app.post('/api/export', (req, res) => {
     reused: result.reused === true,
   });
 });
-
-/**
- * Run the existing single-stream export logic (two-stage: download raw + remux).
- * Extracted into a function so it can be called as the primary path or as a fallback.
- */
-async function runSingleStreamExport({ taskId, ip, httpPort, rtspPort, deviceId, user, pass, channel, startTime, endTime, totalSeconds, baseFilename, signal, outputDir = downloadsDir }) {
-  const mp4Path = path.join(outputDir, `${baseFilename}.mp4`);
-  const rtspPath = devicePathCache.get(ip) === 'channels' ? 'Channels' : 'tracks';
-  const rtspUrl = `rtsp://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${deviceRtspAuthority({ ip, rtspPort })}/Streaming/${rtspPath}/${channel}?starttime=${startTime}&endtime=${endTime}`;
-  // Wait for close, not error/abort: the next export must not overlap a dying child.
-  const runChild = (binary, args, onData) => new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new Error('任务已取消'));
-    let child, failure, output = '', killTimer, deadline;
-    try { child = spawn(binary, args); } catch (error) { reject(error); return; }
-    const abort = () => {
-      child.kill('SIGTERM');
-      if (!killTimer) killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
-    };
-    if (binary === ffprobePath) deadline = setTimeout(() => {
-      failure = new Error('视频编码探测超时'); abort();
-    }, 20000);
-    signal?.addEventListener('abort', abort, { once: true });
-    child.stdout?.on('data', chunk => { output += chunk.toString(); });
-    child.stderr?.on('data', chunk => onData?.(chunk.toString()));
-    child.on('error', error => { failure = error; });
-    child.on('close', code => {
-      signal?.removeEventListener('abort', abort);
-      clearTimeout(killTimer); clearTimeout(deadline);
-      if (signal?.aborted) reject(new Error('任务已取消'));
-      else if (failure || code !== 0) reject(failure || new Error(`进程退出码 ${code}`));
-      else resolve(output);
-    });
-    if (signal?.aborted) abort();
-  });
-  broadcastProgress(taskId, 'downloading', 0, '正在检测视频编码格式...');
-  let codec = 'h264', rawVidPath;
-  try {
-    try {
-      const stdout = await runChild(ffprobePath, ['-v', 'error', '-select_streams', 'v:0', '-show_entries',
-        'stream=codec_name', '-of', 'default=noprint_wrappers=1:nokey=1', rtspUrl]);
-      if (stdout.includes('hevc')) codec = 'hevc';
-    } catch (error) { if (signal?.aborted) throw error; }
-    rawVidPath = path.join(outputDir, `${baseFilename}.${codec}`);
-    const bsf = codec === 'hevc' ? 'hevc_mp4toannexb' : 'h264_mp4toannexb';
-    broadcastProgress(taskId, 'downloading', 2, '阶段1：正在下载原始视频流...');
-    await runChild(ffmpegPath, ['-rtsp_transport', 'tcp', '-timeout', '15000000', '-i', rtspUrl,
-      '-c:v', 'copy', '-an', '-bsf:v', bsf, '-f', codec, '-y', rawVidPath], out => {
-      const match = out.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
-      if (match && totalSeconds > 0) {
-        const progress = Math.min(Math.round(parseTimeStr(match[1]) / totalSeconds * 90), 90);
-        broadcastProgress(taskId, 'downloading', progress, `阶段1：正在下载 (${progress}%)`);
-      }
-    });
-    if (!fs.existsSync(rawVidPath) || !fs.statSync(rawVidPath).size) throw new Error('未能获取到该时间段的录像');
-    broadcastProgress(taskId, 'converting', 95, '阶段2：正在封装为正确速率的MP4...');
-    await runChild(ffmpegPath, ['-r', '20', '-i', rawVidPath, '-c', 'copy', '-movflags', '+faststart', '-y', mp4Path]);
-    if (!fs.existsSync(mp4Path) || !fs.statSync(mp4Path).size) throw new Error('封装失败');
-    broadcastProgress(taskId, 'completed', 100, `导出成功！文件保存为: ${baseFilename}.mp4`);
-    return mp4Path;
-  } finally {
-    if (rawVidPath) { try { fs.unlinkSync(rawVidPath); } catch {} }
-  }
-}
 
 // 5. Recordings Search Endpoint
 app.get('/api/recordings', async (req, res) => {

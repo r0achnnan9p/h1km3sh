@@ -15,10 +15,10 @@ class Element {
   contains(node){return this===node||this.children.some(child=>child.contains(node));}
 }
 function harness(mode='native') {
-  const nodes=new Map(['view-replay','replay-overlays','replay-fullscreen','scrub-time-overlay','trim-magnifier','toast'].map(id=>[id,new Element()]));
+  const nodes=new Map(['view-replay','replay-overlays','replay-fullscreen','scrub-time-overlay','toast'].map(id=>[id,new Element()]));
   let interrupts=0;
   const body=new Element(),view=nodes.get('view-replay'),overlays=nodes.get('replay-overlays'),listeners={},navigation=[];
-  body.dataset={view:'replay'};body.append(view,overlays);overlays.append(...['scrub-time-overlay','trim-magnifier','toast'].map(id=>nodes.get(id)));
+  body.dataset={view:'replay'};body.append(view,overlays);overlays.append(...['scrub-time-overlay','toast'].map(id=>nodes.get(id)));
   const document={body,querySelector:()=>null,querySelectorAll:()=>[],fullscreenElement:null,createElement:()=>new Element(),addEventListener(type,fn){listeners[type]=fn;},async exitFullscreen(){document.fullscreenElement=null;listeners.fullscreenchange?.();}};
   if(mode==='native')view.requestFullscreen=async()=>{document.fullscreenElement=view;listeners.fullscreenchange?.();};
   if(mode==='rejected')view.requestFullscreen=async()=>{throw Error('unavailable');};
@@ -30,13 +30,13 @@ function harness(mode='native') {
   vm.runInContext(script.slice(script.indexOf('function navigate('),script.indexOf("\ndocument.querySelectorAll('[data-view]')")),context);
   return{interrupts:()=>interrupts,body,view,overlays,nodes,listeners,document,context,navigation,click:()=>nodes.get('replay-fullscreen').listeners.click()};
 }
-test('shared Trim/time/toast container is in the template and moves into native fullscreen then restores',async()=>{
+test('shared time/toast container is in the template and moves into native fullscreen then restores',async()=>{
   const html=statusDashboardPage();const container=html.slice(html.indexOf('id="replay-overlays"'));
-  for(const id of ['scrub-time-overlay','trim-magnifier','toast']) assert.ok(container.includes(`id="${id}"`));
+  for(const id of ['scrub-time-overlay','toast']) assert.ok(container.includes(`id="${id}"`));
   const h=harness();
   for(let cycle=0;cycle<3;cycle++) {
     await h.click();assert.equal(h.document.fullscreenElement,h.view);assert.equal(h.overlays.parentElement,h.view);
-    for(const id of ['scrub-time-overlay','trim-magnifier','toast'])assert.ok(h.view.contains(h.nodes.get(id)));
+    for(const id of ['scrub-time-overlay','toast'])assert.ok(h.view.contains(h.nodes.get(id)));
     assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'],'退出全屏回放');
     await h.click();assert.equal(h.overlays.parentElement,h.body);assert.equal(h.document.fullscreenElement,null);assert.equal(h.body.children.filter(node=>node===h.overlays).length,1);
   }

@@ -34,7 +34,7 @@ function harness(playbackSource = 'mediamtx', focusBoundary = 'in') {
   vm.runInContext(source.slice(source.indexOf('function timelineWindow('), source.indexOf('function renderOverview(')), context);
   vm.runInContext(source.slice(source.indexOf('function setTimelineWindow('), source.indexOf('function renderTimeline(')), context);
   vm.runInContext(source.slice(source.indexOf('function openRangeEditor('), source.indexOf('function recoverOutputRename(')), context);
-  vm.runInContext(source.slice(source.indexOf('function playbackContextKey('), source.indexOf('function openBoundaryEditor(')), context);
+  vm.runInContext(source.slice(source.indexOf('function playbackContextKey('), source.indexOf('function updateSelection(')), context);
   context.openRangeEditor(focusBoundary);
   return { state, day, inputs, context, $, sheet: sheets[0], apply: () => actions[0].click() };
 }

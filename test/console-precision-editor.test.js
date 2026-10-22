@@ -15,7 +15,7 @@ function editor() {
     addButton(_parent, label, _className, action) { actions.set(label, action); }, openRangeEditor() { sheet.rangeOpened = true; },
     async jumpToTimelineTime(ms, source, options) { jumps.push({ ms, source, options }); state.cursorMs = ms; },
   });
-  vm.runInContext(source.slice(source.indexOf('function playbackContextKey('), source.indexOf('function openBoundaryEditor(')), context);
+  vm.runInContext(source.slice(source.indexOf('function playbackContextKey('), source.indexOf('function updateSelection(')), context);
   vm.runInContext(source.slice(source.indexOf('function openPlaybackTimeEditor()'), source.indexOf('function openRangeEditor(')), context);
   context.openPlaybackTimeEditor();
   return { state, input, sheet, jumps, actions };

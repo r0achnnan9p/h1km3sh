@@ -39,11 +39,11 @@ $env:HIKVISION_MEDIAMTX_API_URL = ''
 node server.js
 ~~~
 
-本机访问 http://127.0.0.1:30001 。首次无设备/录像属于正常状态；退出使用 Ctrl+C。data/ 保存设备凭据和状态，downloads/ 保存导出文件，均应保持私有并禁止提交。需要自定义目录或 MediaMTX 来源时，按 [源码快速开始](docs/oss-quickstart.md) 逐项配置。Node.js 24 可用 node --env-file=自己的私有配置文件 server.js 读取配置；不要假定应用自动加载 .env。
+30001 只提供 API 和静态模块，根路径 `/` 返回 404。网页控制台需要按“安全访问与控制台”配置独立的 30002 受保护网关后访问。首次无设备/录像属于正常状态；退出使用 Ctrl+C。data/ 保存设备凭据和状态，downloads/ 保存导出文件，均应保持私有并禁止提交。需要自定义目录或 MediaMTX 来源时，按 [源码快速开始](docs/oss-quickstart.md) 逐项配置。Node.js 24 可用 node --env-file=自己的私有配置文件 server.js 读取配置；不要假定应用自动加载 .env。
 
 ## 安全访问与控制台
 
-**30001 是未鉴权的内部 API/旧入口，包含设备凭据与下载能力。保持 HIKCLIP_BIND=127.0.0.1，绝不反代、端口转发或公开此端口。** 不设置绑定地址时，通用启动默认仍为 0.0.0.0。
+**30001 是未鉴权的内部 API，包含设备凭据与下载能力，且不再提供网页入口。保持 HIKCLIP_BIND=127.0.0.1，绝不反代、端口转发或公开此端口。** 不设置绑定地址时，通用启动默认仍为 0.0.0.0。
 
 手机、另一台电脑或外部访问使用独立的 **30002 受保护网关和 HTTPS**。需要显式配置 HIKCLIP_PUBLIC_PORT、HIKCLIP_PUBLIC_BIND、真实 HTTPS 的 HIKCLIP_PUBLIC_BASE_URL、独立的 MCP token 文件和网页登录密码。密码可在自己的私有环境文件设置 HIKCLIP_LOGIN_PASSWORD（8–128字符），或由本机 npm run setup:status-password 完成初始化；不要把密码或设置码发到聊天、issue 或日志。反代仅接入30002，并限制其网络可达范围。详细配置与认证边界见 [网关/MCP](docs/camera-mcp.md)、[安全政策](SECURITY.md)。
 

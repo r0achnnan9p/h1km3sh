@@ -66,7 +66,7 @@ export function setupDebugMark({ $, state, debugMark }) {
   });
   // Register once; reopening the panel must not multiply event diagnostics.
   for (const id of ['mark-in', 'mark-out']) for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'click']) {
-    $(id)?.addEventListener(type, () => { if (enabled) debugMark(`raw-${type}`, { id, disabled: $(id).disabled, dragging: state.dragging, pendingScrub: Boolean(state.pendingScrub) }); }, true);
+    $(id)?.addEventListener(type, () => { if (enabled) debugMark(`raw-${type}`, { id, disabled: $(id).disabled, dragging: state.dragging }); }, true);
   }
   for (const type of ['blur', 'focus']) window.addEventListener(type, () => { if (enabled) debugMark(`window-${type}`); });
   for (const type of ['resize', 'scroll', 'orientationchange', 'pageshow', 'hashchange', 'click']) window.addEventListener(type, scheduleViewport);

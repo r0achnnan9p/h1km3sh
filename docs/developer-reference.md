@@ -10,13 +10,13 @@
 
 - `server.js`：HTTP API、SSE、任务状态、导出编排、Web 静态托管、MCP HTTP 挂载、scheduler 启动。
 - `lib/`：设备存储、RTSP、ISAPI、下载/裁剪/拼接、MCP、scheduler、后台服务等核心模块。
-- `public/`：无构建步骤的 ES Module 单页前端；`app.js` 负责状态和交互，`timeline.js` 负责 24h 录像轨道，`api.js` 封装 HTTP。
+- `public/`：无构建步骤的 ES Module 控制台前端；`console.js` 负责状态和交互，`precision-timeline.js` 负责时间轴手势，`ui-primitives.js` 提供共享控件与图标。
 - `data/`：运行时配置与状态。设备为 `devices.json`，UI 会话为 session store，计划为 `schedules.json`；后台服务还会使用 `data/service/`。
 - `downloads/`：成品 MP4 与 `.hikraw` 等缓存/中间文件。
 - `scripts/`：便携包、SEA、后台服务 CLI 与 node 二进制下载。
 - `test/`：`node --test` 测试。
 
-首次运行 `node server.js` 后浏览器访问启动日志给出的地址。默认尝试 `30001`，被占用时自动顺延。
+首次运行 `node server.js` 后，`30001`（被占用时自动顺延）只提供 API 和静态模块，根路径 `/` 返回 404。网页控制台需要配置并访问独立的 `30002` 受保护网关。
 
 ## 设备、会话与凭据
 
@@ -62,10 +62,6 @@ DVR 成品发布使用异步文件复制，避免数 GB 文件阻塞 HTTP/SSE �
 ### `auto` 选择
 
 `lib/export-method.js` 根据时长选择：短于 1 小时用 `rtspclip`，达到或超过 1 小时用 `mp4download`。这是 MCP 与 scheduler 等自动调用方的策略；HTTP `/api/export` 的缺省仍保持 `rtspclip`，避免改变既有 Web 行为。
-
-### 旧 `method=rtsp`
-
-`server.js` 仍保留更早期的 RTSP 单流/并行链路，包括 `parallel-download.js`、`download-manager.js`、`segment-splitter.js` 和 `runSingleStreamExport()`。前端下拉框不暴露它，只能直接调 API 进入。它属于兼容遗留，不是当前主路径。
 
 ## 单飞守卫与任务状态
 
@@ -196,13 +192,11 @@ scheduler 跑在**常驻服务进程**，不依赖 MCP 客户端在线。它定�
 
 以下问题当前存在，但**不自动进入普通任务范围**：
 
-1. **旧 `method=rtsp` 链路基本不可达。** Web UI 只暴露 `rtspclip` / `mp4download`，旧 `parallel-download.js`、`download-manager.js`、`segment-splitter.js` 与 `runSingleStreamExport()` 主要剩 API 兼容价值。确认无外部调用后可单独评估删除。
-2. **部分旧 lib 模块只被测试引用。** `concatenator.js`、`remuxer.js`、`segment-trimmer.js` 等需要在清理任务中重新核对生产 import 图，再决定是否连测试一起移除。
-3. **设备凭据仍经客户端往返。** `/api/devices` 返回密码，前端再传 `ip/user/pass`；彻底修复需要服务端以 device id 解析凭据，是独立安全重构。
-4. **旧设备 JSON 可能残留已废弃字段。** 早期 `port/httpPort` 已不再参与运行；老数据中残留字段会被忽略。除非做 schema 清理，不需要普通任务顺手迁移。
-5. **本源码分发没有自动发布流水线。** 如将来需要二进制分发，应另行审阅目标平台、依赖许可、产物与权限，不能将历史构建入口视为已验证发版。
-6. **Windows 后台服务缺少充分真机覆盖。** Windows 计划任务/VBS 路径有测试，但平台级 install/start/stop/uninstall 仍应在真实 Windows 环境验收后再宣称完全闭环。
-7. **中断产生的裸流文件不是立即清理。** retention 会最终处理 `.h264`/`.hevc`/`.aac` 等残留，但崩溃后到保留期清理前仍可能占用较大磁盘；如果磁盘压力成为现实问题，可单独增加安全的启动清理策略。
+1. **设备凭据仍经客户端往返。** `/api/devices` 返回密码，前端再传 `ip/user/pass`；彻底修复需要服务端以 device id 解析凭据，是独立安全重构。
+2. **旧设备 JSON 可能残留已废弃字段。** 早期 `port/httpPort` 已不再参与运行；老数据中残留字段会被忽略。除非做 schema 清理，不需要普通任务顺手迁移。
+3. **本源码分发没有自动发布流水线。** 如将来需要二进制分发，应另行审阅目标平台、依赖许可、产物与权限，不能将历史构建入口视为已验证发版。
+4. **Windows 后台服务缺少充分真机覆盖。** Windows 计划任务/VBS 路径有测试，但平台级 install/start/stop/uninstall 仍应在真实 Windows 环境验收后再宣称完全闭环。
+5. **中断产生的裸流文件不是立即清理。** retention 会最终处理 `.h264`/`.hevc`/`.aac` 等残留，但崩溃后到保留期清理前仍可能占用较大磁盘；如果磁盘压力成为现实问题，可单独增加安全的启动清理策略。
 
 已不再属于技术债的旧描述不要重新写回：当前 Web 已有 `/api/schedules` GET/PUT，scheduler 的 `lastRun` 也会在终态回写并在启动时恢复中断状态。
 

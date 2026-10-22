@@ -1,10 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 const publicDir = new URL('../public/', import.meta.url);
-// 30001 的旧 LAN 页面仍由 express.static 提供且被设备编辑测试引用；禁止误删或借收口改主题。
-const legacyStyles = new Map([['style.css', 'c340f2a4981e5729cc9bc747ac9cf83c3c9280f4b70862a9962940c67d17ab53']]);
 function checkCss(input) {
   const whole = input.replace(/\/\*[\s\S]*?\*\//g, '');
   assert.doesNotMatch(whole, /@import|https?:\/\/|\bInter\b/i, '禁止外部字体/Inter');
@@ -18,11 +15,9 @@ function checkCss(input) {
   }
   for (const [, value] of source.matchAll(/(?:box-shadow|backdrop-filter):\s*([^;{}]+)/g)) assert.match(value, /^(none|var\(--glass(?:-prompt)?-(?:shadow|blur)\))$/);
 }
-test('新版控制台样式只用Token，仍在提供的旧LAN样式保持固定字节', () => {
+test('控制台样式只用Token', () => {
   for (const name of fs.readdirSync(publicDir).filter(name => name.endsWith('.css'))) {
-    const bytes = fs.readFileSync(new URL(name, publicDir));
-    if (legacyStyles.has(name)) assert.equal(createHash('sha256').update(bytes).digest('hex'), legacyStyles.get(name), '旧LAN入口须另行审查，不可悄悄放宽例外');
-    else checkCss(bytes.toString('utf8'));
+    checkCss(fs.readFileSync(new URL(name, publicDir), 'utf8'));
   }
 });
 test('全部前端JavaScript的静态SVG集中在图标注册表', () => {

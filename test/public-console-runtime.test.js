@@ -126,9 +126,20 @@ test('公网录像控制台贯通认证、摄像头回放、成片保护、上�
     assert.match(dashboard, /href="\/zl-camera\/console\.css"/);
     assert.match(dashboard, /src="\/zl-camera\/console\.js"/);
     const tunnelConfig = fs.readFileSync(path.join(root, 'deploy/cloudflared.example.yml'), 'utf8');
-    assert.ok(tunnelConfig.includes('console-icon(-v1)?\\.png'));
-    assert.ok(tunnelConfig.includes('site(-v1)?\\.webmanifest'));
+    assert.ok(tunnelConfig.includes('console-icon-v2(-192|-512)?\\.(svg|png)'));
+    assert.ok(tunnelConfig.includes('apple-touch-icon-v2\\.png'));
+    assert.ok(tunnelConfig.includes('site-v2\\.webmanifest'));
+    assert.ok(!tunnelConfig.includes('console-icon(-v1)'));
+    assert.ok(!tunnelConfig.includes('site(-v1)'));
     const tunnelPathPattern = new RegExp(tunnelConfig.split('path: ')[1].split('\n')[0].trim());
+    // Every browser asset the gateway serves must also pass the Tunnel ingress
+    // filter, otherwise the console silently loads 404s behind the proxy.
+    for (const name of fs.readdirSync(path.join(root, 'public')).filter(name => /\.(js|css)$/.test(name))) {
+      assert.ok(tunnelPathPattern.test(`/${name}`), `Tunnel must allow /${name}`);
+    }
+    for (const asset of ['/console-icon-v2.svg', '/console-icon-v2-192.png', '/console-icon-v2-512.png', '/apple-touch-icon-v2.png', '/site-v2.webmanifest']) {
+      assert.ok(tunnelPathPattern.test(asset), `Tunnel must allow ${asset}`);
+    }
     const sampleDvr = '12345678-1234-1234-1234-123456789abc';
     for (const route of ['config', 'cameras', 'mediamtx', 'dvrs', `dvrs/${sampleDvr}`, ...['test', 'snapshot', 'channels', 'segments', 'stream'].map(action => `dvrs/${sampleDvr}/${action}`), 'export/stop']) {
       assert.ok(tunnelPathPattern.test(`/console/api/${route}`), route);
@@ -166,11 +177,9 @@ test('公网录像控制台贯通认证、摄像头回放、成片保护、上�
     const taskPresentationModule = await fetch(publicBase + '/task-presentation.js');
     assert.equal(taskPresentationModule.status, 200);
     assert.match(await taskPresentationModule.text(), /草稿和队列等待不伪装成正在处理/);
-    assert.equal((await fetch(publicBase + '/console-icon.png')).status, 200);
-    const manifest = await fetch(publicBase + '/site.webmanifest');
-    assert.equal(manifest.status, 200);
-    assert.equal((await manifest.json()).display, 'standalone');
-    assert.equal((await fetch(publicBase + '/console-icon-v1.png')).status, 200);
+    for (const legacy of ['console-icon.png', 'console-icon-v1.png', 'site.webmanifest', 'site-v1.webmanifest', 'index.html', 'app.js', 'style.css']) {
+      assert.equal((await fetch(publicBase + '/' + legacy)).status, 404, legacy);
+    }
     for (const icon of ['console-icon-v2.svg', 'console-icon-v2-192.png', 'console-icon-v2-512.png', 'apple-touch-icon-v2.png']) assert.equal((await fetch(publicBase + '/' + icon)).status, 200);
     const versionedManifest = await fetch(publicBase + '/site-v2.webmanifest');
     assert.equal(versionedManifest.status, 200);

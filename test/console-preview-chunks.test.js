@@ -215,7 +215,7 @@ test('pausing HLS beyond the idle limit preserves the picture and exact cursor, 
   h.context.fetch = (_url, options) => { stopped.push(JSON.parse(options.body)); return Promise.resolve(); };
   Object.assign(h.context, { dateStart: () => h.start, clampTimelineCenter: ms => Math.max(h.start, Math.min(h.start + 86399999, ms)), renderTimeline() {}, timelineWindow: () => ({ start: h.start, end: h.start + 3600000, span: 3600000 }), updateCursor() {} });
   vm.runInContext(script.slice(script.indexOf('function syncPlaybackCursor('), script.indexOf('function markPlaybackBoundary(')), h.context);
-  vm.runInContext(script.slice(script.indexOf('async function toggleReplayPlayback('), script.indexOf('function timeAtTimeline(')), h.context);
+  vm.runInContext(script.slice(script.indexOf('async function toggleReplayPlayback('), script.indexOf('function updateTimelineHover(')), h.context);
   await h.context.playAt(h.start);
   const source = h.video.src; h.readyHls();
   Object.assign(h.video, { currentSrc: source, currentTime: 7.25, readyState: 4, paused: false }); h.state.followPlayback = true;
@@ -348,7 +348,7 @@ test('HLS origin watchdog is bounded and stale readiness/timers cannot replace a
 
 test('play toggle cannot bypass pending HLS origin and a rejected autoplay remains resumable', async () => {
   const h = harness({ source: 'dvr' });
-  vm.runInContext(script.slice(script.indexOf('async function toggleReplayPlayback('), script.indexOf('function timeAtTimeline(')), h.context);
+  vm.runInContext(script.slice(script.indexOf('async function toggleReplayPlayback('), script.indexOf('function updateTimelineHover(')), h.context);
   await h.context.playAt(h.start); await h.context.toggleReplayPlayback(); assert.equal(h.pending.length, 0);
   h.readyHls(); h.pending[0].reject(new Error('user gesture required')); await Promise.resolve(); await Promise.resolve();
   assert.equal(h.state.hlsStopped, false); assert.equal(h.state.playbackAutoplay, false); assert.equal(h.video.hidden, false);
@@ -425,7 +425,7 @@ test('iPhone Safari, Edge and Mac Safari use native live HLS, desktop Chrome kee
 
 test('paused live HLS resumes as live rather than silently opening historical playback', async () => {
   const h = harness({ source: 'dvr' }); h.context.startDvrLive(); h.readyHls(8);
-  vm.runInContext(script.slice(script.indexOf('async function toggleReplayPlayback('), script.indexOf('function timeAtTimeline(')), h.context);
+  vm.runInContext(script.slice(script.indexOf('async function toggleReplayPlayback('), script.indexOf('function updateTimelineHover(')), h.context);
   h.video.paused = false; h.context.syncPlaybackCursor = () => {};
   await h.context.toggleReplayPlayback(); assert.equal(h.state.hlsStopped, true);
   const old = h.state.playRequestId; await h.context.toggleReplayPlayback();

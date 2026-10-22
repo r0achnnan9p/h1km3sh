@@ -20,8 +20,7 @@ function fixture({ span = 30 } = {}) {
   };
   const buttons = [86400, 3600, 300, 30].map(value => ({ dataset: { timelineSpan: String(value) }, attrs: {},
     setAttribute(name, value) { this.attrs[name] = value; }, classList: { toggle() {} } }));
-  const c = vm.createContext({ state, $, consoleSession: 0, precisionTimeline: null, stopTimelinePan() {},
-    cancelTimelineScrub() { throw new Error('legacy gesture unexpectedly remained active'); }, createPrecisionTimeline,
+  const c = vm.createContext({ state, $, consoleSession: 0, precisionTimeline: null, createPrecisionTimeline,
     NaN, Math, JSON, Date: { now: () => 172_800_000 }, DEFAULT_TIMELINE_SPAN_SECONDS: 86400,
     TIMELINE_SPANS: [86400, 3600, 300, 30], dateStart: () => 0,
     showScrubTime() {}, fadeScrubTime() {}, renderTimeline() { renders++; }, setPlaybackNotice() {},
