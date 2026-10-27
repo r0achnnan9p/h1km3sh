@@ -6,7 +6,7 @@ export function createOutputPlayers({ document = globalThis.document, resolveUrl
   function create(file) {
     let currentFile = file;
     let source = resolveUrl(file.streamUrl), expanded = false, loaded = false, disposed = false;
-    let wantsPlay = false, request = 0, phase = 'idle', resumeAt = 0;
+    let wantsPlay = false, request = 0, phase = 'idle', resumeAt = 0, knownDuration = NaN;
     const listeners = [];
     const element = document.createElement('section'); element.className = 'output-preview';
     const surface = document.createElement('div'); surface.className = 'output-preview-surface';
@@ -64,7 +64,8 @@ export function createOutputPlayers({ document = globalThis.document, resolveUrl
       render();
     }
     function render() {
-      duration.textContent = Number.isFinite(video.duration) ? formatTime(video.duration) : '--:--';
+      const total = videoDuration();
+      duration.textContent = Number.isFinite(total) ? formatTime(total) : '--:--';
       element.dataset.state = phase; element.dataset.expanded = String(expanded);
       element.setAttribute('aria-busy', String(phase === 'loading'));
       video.hidden = !expanded; poster.hidden = expanded; toolbar.hidden = !expanded;
@@ -74,9 +75,13 @@ export function createOutputPlayers({ document = globalThis.document, resolveUrl
       backward.disabled = forward.disabled = !loaded || !Number.isFinite(video.duration) || video.duration <= 0 || phase === 'error';
       retry.hidden = phase !== 'error'; time.hidden = !expanded;
       caption.hidden = !expanded && phase !== 'error';
-      time.textContent = `${formatTime(video.currentTime)} / ${Number.isFinite(video.duration) ? formatTime(video.duration) : '--:--'}`;
+      time.textContent = `${formatTime(video.currentTime)} / ${Number.isFinite(total) ? formatTime(total) : '--:--'}`;
       fullscreen.textContent = document.fullscreenElement === element ? '退出全屏' : '全屏';
       collapse.setAttribute('aria-label', '收起并暂停成片');
+    }
+    // 视频源是懒加载的，播放前 metadata 还没到；列表接口给出的时长让角标不必一直显示 --:--。
+    function videoDuration() {
+      return Number.isFinite(video.duration) && video.duration > 0 ? video.duration : knownDuration;
     }
     function pause() {
       wantsPlay = false; request++;
@@ -140,6 +145,8 @@ export function createOutputPlayers({ document = globalThis.document, resolveUrl
     listen(document, 'fullscreenchange', render);
     function update(next) {
       currentFile = next;
+      const listedDuration = Number(next.durationSeconds);
+      knownDuration = Number.isFinite(listedDuration) && listedDuration > 0 ? listedDuration : NaN;
       const nextThumbnail = next.thumbnailUrl ? resolveUrl(next.thumbnailUrl) : '';
       if (thumbnailSource !== nextThumbnail) {
         thumbnailSource = nextThumbnail; thumbnail.dataset.loaded = 'false';
@@ -154,6 +161,7 @@ export function createOutputPlayers({ document = globalThis.document, resolveUrl
       element.setAttribute('aria-label', `${next.filename} · 成片预览`);
       video.setAttribute('aria-label', next.filename);
       poster.setAttribute('aria-label', `播放成片：${next.filename}`);
+      render();
     }
     function destroy() {
       disposed = true; wantsPlay = false; request++;
