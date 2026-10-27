@@ -125,6 +125,22 @@ test('损坏、越界或历史无身份的来源元数据不会影响列举', ()
 });
 
 
+test('成片列表带出 mvhd 时长，损坏文件保留 null 供 UI 回退', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'output-library-duration-'));
+  try {
+    const box = (type, payload) => {
+      const header = Buffer.alloc(8); header.writeUInt32BE(payload.length + 8); header.write(type, 4, 4, 'latin1');
+      return Buffer.concat([header, payload]);
+    };
+    const mvhd = Buffer.alloc(20); mvhd.writeUInt32BE(1000, 12); mvhd.writeUInt32BE(42000, 16);
+    fs.writeFileSync(path.join(root, 'valid.mp4'), Buffer.concat([box('ftyp', Buffer.alloc(8)), box('moov', box('mvhd', mvhd))]));
+    fs.writeFileSync(path.join(root, 'broken.mp4'), 'not an mp4');
+    const files = listOutputLibrary(root);
+    assert.equal(files.find(file => file.filename === 'valid.mp4').durationSeconds, 42);
+    assert.equal(files.find(file => file.filename === 'broken.mp4').durationSeconds, null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('控制台完整元数据支持超过 200 个成片，原限量调用不变', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'output-library-many-'));
   try {

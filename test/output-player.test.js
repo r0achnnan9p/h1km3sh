@@ -62,6 +62,7 @@ function harness(options = {}) {
       retry: element.find(node => node.className.includes('output-player-retry')),
       status: element.find(node => node.className === 'output-player-status'),
       time: element.find(node => node.className === 'output-player-time'),
+      duration: element.find(node => String(node.className).includes('output-duration')),
       fullscreen: element.find(node => node.textContent === '全屏'),
     };
   };
@@ -95,6 +96,23 @@ test('finished-video cards are lazy, video-first, and retain native controls', a
   await p.collapse.click();
   assert.equal(p.video.paused, true); assert.equal(p.video.hidden, true); assert.equal(p.poster.focused, true);
   await p.poster.click(); assert.equal(p.video.loads, 1);
+});
+
+test('finished videos show the listed duration before the lazy video metadata loads', async () => {
+  const h = harness(), p = h.node('known');
+  assert.equal(p.video.src, '');
+  assert.equal(p.duration.textContent, '--:--');
+  h.players.get(file('known', { durationSeconds: 125.8 }));
+  assert.equal(p.duration.textContent, '02:05');
+  await p.poster.click();
+  assert.equal(p.duration.textContent, '02:05');
+  p.video.duration = 95; await p.video.emit('loadedmetadata');
+  assert.equal(p.duration.textContent, '01:35');
+  assert.equal(p.time.textContent, '00:00 / 01:35');
+  h.players.get(file('known', { durationSeconds: 60 }));
+  assert.equal(p.duration.textContent, '01:35');
+  h.players.get(file('known', { durationSeconds: 60, streamUrl: '/changed/stream' }));
+  assert.equal(p.duration.textContent, '01:00');
 });
 
 test('large seek controls wait for metadata and clamp both ends without autoplaying', async () => {

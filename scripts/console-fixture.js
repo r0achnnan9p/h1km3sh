@@ -24,7 +24,7 @@ const success = (res, value = {}) => res.json({ success: true, ...value });
 const failure = (res, status, error, extra = {}) => res.status(status).json({ success: false, error, ...extra });
 
 function output(id, filename, minutesAgo = 0, extra = {}) {
-  return { id, filename, size: 364148, modifiedAt: new Date(Date.now() - minutesAgo * 60000).toISOString(), streamUrl: `/console/api/outputs/${id}/stream`, thumbnailUrl: `/console/api/outputs/${id}/thumbnail`, busy: false, ...extra };
+  return { id, filename, size: 364148, durationSeconds: 612.4, modifiedAt: new Date(Date.now() - minutesAgo * 60000).toISOString(), streamUrl: `/console/api/outputs/${id}/stream`, thumbnailUrl: `/console/api/outputs/${id}/thumbnail`, busy: false, ...extra };
 }
 function initialState(scenario, { missingCover = false, readySettings = false, manyTasks = false } = {}) {
   const empty = scenario === 'empty', date = dateToday();
@@ -39,8 +39,8 @@ function initialState(scenario, { missingCover = false, readySettings = false, m
     playbackUrl: 'http://mediamtx.fixture.invalid:9996',
     outputs: empty ? [] : [
       output('fixture-output-1', `${date}_主球场_精彩片段.mp4`, 5),
-      output('fixture-output-2', `${date}_东侧球场_完整训练.mp4`, 90, { size: 734003200 }),
-      output('fixture-output-3', `${date}_场边机位_精彩进球与训练回顾_加长文件名测试.mp4`, 180, { size: 1073741824 }),
+      output('fixture-output-2', `${date}_东侧球场_完整训练.mp4`, 90, { size: 734003200, durationSeconds: 4325.8 }),
+      output('fixture-output-3', `${date}_场边机位_精彩进球与训练回顾_加长文件名测试.mp4`, 180, { size: 1073741824, durationSeconds: 58 }),
     ],
     tasks: empty ? [] : [
       { taskId: 'fixture-running', queuedAt: Date.now() - 20 * 60000, title: '主球场 · 上午训练', source: 'mediamtx', camera: '主球场', status: 'downloading', stage: 'downloading', stagePercent: 64, progressUnit: 'bytes', message: '演示任务 · 正在读取本地录像片段' },
@@ -304,7 +304,7 @@ export function createConsoleFixture({ mediaPath = MEDIA, taskStepMs = 1000, ver
     [20, 65, 100].forEach((percent, index) => scheduleExport(state, () => {
       if (task.status === 'cancelled') return;
       Object.assign(task, { status: percent === 100 ? 'completed' : 'downloading', stage: 'downloading', stagePercent: percent, progressUnit: 'bytes' });
-      if (percent === 100) { task.message = '演示导出已完成，已加入成片库。'; state.outputs.unshift(output(`fixture-${task.taskId}`, `${String(input.start).slice(0, 10)}_${input.camera || 'DVR'}_演示导出${coverage.missingSeconds ? '_含缺口' : ''}.mp4`)); }
+      if (percent === 100) { task.message = '演示导出已完成，已加入成片库。'; state.outputs.unshift(output(`fixture-${task.taskId}`, `${String(input.start).slice(0, 10)}_${input.camera || 'DVR'}_演示导出${coverage.missingSeconds ? '_含缺口' : ''}.mp4`, 0, { durationSeconds: (end - start) / 1000 })); }
       emit(state);
     }, (index + 1) * taskStepMs));
   });
