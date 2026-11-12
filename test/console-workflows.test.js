@@ -98,13 +98,13 @@ test('cover previews respect the gateway image CSP and account errors preserve e
   assert.match(script, /error\.code = data\?\.code \|\| data\?\.errorCode/);
 });
 
-test('narrow replay keeps one product heading and visible selectors while other tabs retain their headings', async () => {
+test('narrow replay keeps one page heading and visible selectors while other tabs retain their headings', async () => {
   const css = fs.readFileSync(new URL('../public/console.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /workspace-header/);
   assert.match(css, /\.precision-layout #view-replay\.focus-replay \.replay-topbar \{[^}]*display:flex/);
   assert.match(css, /\.precision-layout #view-replay\.focus-replay \.playback-quick-controls \{[^}]*display:grid/);
   const { statusDashboardPage } = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
-  assert.match(html, /<header[^>]*id="app-title"[^>]*><span>H1kM3sh<\/span>/);
+  assert.match(html, /<header[^>]*id="app-title"[^>]*><h1>录像回放<\/h1>/);
   assert.doesNotMatch(html, /<h1>回放<\/h1>/);
   for (const heading of ['成片', '任务', '设置']) assert.ok(html.includes(`<h1>${heading}</h1>`));
   const topbar = html.slice(html.indexOf('class="page-heading replay-heading replay-topbar"'), html.indexOf('class="legacy-replay-toolbar"'));

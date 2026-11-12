@@ -133,6 +133,10 @@ test(`真实 OAuth HTTP ${prefix || '/'}：发现、DCR、登录、code 交换�
     assert.ok(!html.includes(params.state));
     assert.ok(html.includes('state&quot;/&gt;&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;'));
     assert.ok(!html.includes('<script>'));
+    const css = html.match(/<style>([\s\S]*?)<\/style>/)[1];
+    const styleHash = createHash('sha256').update(css).digest('base64');
+    assert.ok(consent.headers.get('content-security-policy').includes(`style-src 'sha256-${styleHash}'`));
+    assert.ok(!consent.headers.get('content-security-policy').includes("'unsafe-inline'"));
     const action = html.match(/<form method="post" action="([^"]+)"/)[1];
     assert.equal(action, `${prefix}/oauth/authorize`);
     const authorization = await fetch(origin + action, { method: 'POST', body: new URLSearchParams({ ...params, password: loginToken }), redirect: 'manual' });

@@ -537,12 +537,12 @@ test('settings modal scrolls its content without moving the page and restores fo
   await b.evaluate(`document.getElementById('settings-open-bilibili').focus({preventScroll:true})`);
   await tap(b, await center(b, '#settings-open-bilibili'));
   const opened = await b.evaluate(`(() => { const d=document.querySelector('dialog[open]'); return {open:!!d,locked:document.documentElement.classList.contains('dialog-scroll-locked'),focus:document.activeElement.tagName,footer:getComputedStyle(d.querySelector('.dialog-actions')).backgroundColor,closeBorder:getComputedStyle(d.querySelector('.dialog-close')).borderTopWidth,refreshBackground:getComputedStyle(d.querySelector('.dialog-actions .ui-icon-button')).backgroundColor}; })()`);
-  assert.deepEqual(opened, { open: true, locked: true, focus: 'H2', footer: 'rgba(0, 0, 0, 0)', closeBorder: '0px', refreshBackground: 'rgba(0, 0, 0, 0)' });
+  assert.deepEqual(opened, { open: true, locked: true, focus: 'H2', footer: 'rgba(0, 0, 0, 0)', closeBorder: '1px', refreshBackground: 'rgba(0, 0, 0, 0)' });
   await b.evaluate(`(() => {const n=document.createElement('div');n.style.height='1200px';n.textContent='合成长内容';document.querySelector('dialog[open] .dialog-body').prepend(n);})()`);
   const backgroundY = await contentScrollY(b);
   await drag(b, [{ x: 4, y: 600 }], 0, -160); assert.equal(await contentScrollY(b), backgroundY, 'dragging outside the modal must not pan background');
   await drag(b, [{ x: 200, y: 600 }], 0, -200);
-  assert.ok(await b.evaluate(`document.querySelector('dialog[open]').scrollTop > 20`), 'content drag must scroll the dialog');
+  assert.ok(await b.evaluate(`document.querySelector('dialog[open] > .dialog-body').scrollTop > 20`), 'content drag must scroll the dialog');
   assert.equal(await contentScrollY(b), backgroundY);
   await b.send('Input.dispatchKeyEvent', { type:'keyDown', key:'Escape', code:'Escape', windowsVirtualKeyCode:27 });
   await b.send('Input.dispatchKeyEvent', { type:'keyUp', key:'Escape', code:'Escape', windowsVirtualKeyCode:27 });
@@ -611,8 +611,11 @@ test('file-picker cancellation stays inside the account sheet and the close icon
   for(let i=0;i<40 && await b.evaluate(`document.getElementById('cover-save').disabled`);i++)await sleep(50);
   assert.equal(await b.evaluate(`!!document.querySelector('dialog[open]') && !document.getElementById('cover-save').disabled`),true,'a selected synthetic image stays in the sheet as an unsaved preview');
   const icon = await b.evaluate(`(() => {const r=document.querySelector('dialog[open] .dialog-close svg').getBoundingClientRect();return [r.width,r.height];})()`);
-  assert.deepEqual(icon, [26,26]);
-  assert.equal(await b.evaluate(`getComputedStyle(document.querySelector('dialog[open] .dialog-close')).backgroundColor`),'rgba(0, 0, 0, 0)');
+  assert.deepEqual(icon, [20,20]);
+  assert.ok(await b.evaluate(`(() => {
+    const r = document.querySelector('dialog[open] .dialog-close').getBoundingClientRect();
+    return r.width >= 44 && r.height >= 44;
+  })()`), 'the close control keeps a full touch target');
   await b.evaluate(`document.querySelector('dialog[open] .dialog-close').click()`);
   assert.equal(await b.evaluate(`!!document.querySelector('dialog[open]')`), false);
 });

@@ -246,6 +246,9 @@ function navigate(view, updateHistory = true) {
     if (view === 'library') { outputFeed?.resume(); }
     if (view === 'library') refreshOutputs().catch(error => notify(error.message, true));
     if (view === 'tasks') refreshState().catch(() => {});
+    if (view === 'settings' && !settingsInline && window.matchMedia?.('(min-width: 1024px)').matches) {
+      openDvrSettings({ focusHeading: false });
+    }
     if (view === 'settings') { if (typeof uploadAccounts !== 'undefined') uploadAccounts.refresh().catch(() => {}); loadSettings().catch(() => {}); loadCache().catch(() => {}); loadConsoleConfig().catch(() => {}); }
   };
   if (view !== 'replay' && typeof cancelReplayFullscreenEntry === 'function') {
@@ -328,7 +331,11 @@ function fillCameras(cameras) {
   if (!cameras.length) {
     state.selectedCamera = '';
     const option = document.createElement('option'); option.value = ''; option.textContent = '暂未发现录像通道'; select.append(option); select.disabled = true;
-    setPlaybackNotice('尚未发现 MediaMTX 通道，请检查录像目录或 MediaMTX API 连接。', true); return;
+    if (state.playbackSource === 'mediamtx') {
+      updatePreviewPlaceholder('尚未发现镜头', '可在设置中检查录像来源');
+      setPlaybackNotice('尚未发现 MediaMTX 通道，请检查录像目录或 MediaMTX API 连接。', true);
+    }
+    return;
   }
   select.disabled = false;
   cameras.forEach(camera => { const option = document.createElement('option'); option.value = camera.id; option.textContent = `${camera.name}${camera.name !== camera.id ? ` · ${camera.id}` : ''}`; select.append(option); });
@@ -446,6 +453,11 @@ $('dvr-channel').addEventListener('change', () => {
   startDvrLive(); loadSegments({ preserveRange: true, keepLive: true }).catch(error => setPlaybackNotice(error.message, true));
 });
 
+function updatePreviewPlaceholder(title, help) {
+  const heading = $('preview-state-title'), description = $('preview-state-help');
+  heading.textContent = title;
+  description.textContent = help;
+}
 function segmentBounds(segment) { const start = Date.parse(segment.start); return { start, end: start + Number(segment.duration) * 1000 }; }
 function timelineWindow() {
   const day = dateStart(state.date), span = (state.timelineSpanSeconds || 86400) * 1000;
@@ -586,6 +598,7 @@ async function loadSegments({ preserveRange = false, keepLive = false } = {}) {
   if (state.playbackSource === 'dvr' && (!$('dvr-select').value || !$('dvr-channel').value)) {
     state.segmentRequestId++; clearReplay(); state.segments = []; state.cursorMs = null; renderTimeline();
     $('timeline').querySelector('.timeline-empty').textContent = '先选择录像机和通道'; $('timeline').querySelector('.timeline-empty').hidden = false;
+    updatePreviewPlaceholder('尚未选择通道', '选择录像机和通道以查看回放');
     setPlaybackNotice('选择录像机和通道后，才能查询海康 DVR 录像。', true); return;
   }
   $('retry-recordings').hidden = true;
@@ -596,12 +609,13 @@ async function loadSegments({ preserveRange = false, keepLive = false } = {}) {
   if (!preserveRange) clearMarkedRange();
   renderTimeline();
   $('timeline').querySelector('.timeline-empty').textContent = '正在读取录像区段…'; $('timeline').querySelector('.timeline-empty').hidden = false;
+  updatePreviewPlaceholder('正在查询录像', '正在读取所选日期的录像时段');
   const query = new URLSearchParams({ date: state.date });
   const path = state.playbackSource === 'dvr'
     ? `/console/api/dvrs/${encodeURIComponent($('dvr-select').value)}/segments?${new URLSearchParams({ date: state.date, channel: $('dvr-channel').value })}`
     : `/console/api/playback/${encodeURIComponent(state.selectedCamera)}/segments?${query}`;
   let data; const loadButton = $('load-recordings'); loadButton.disabled = true; loadButton.textContent = '正在查询…';
-  try { data = await api(path); } catch (error) { if (requestId === state.segmentRequestId) { const empty = $('timeline').querySelector('.timeline-empty'); empty.textContent = '读取失败，请重试。'; empty.hidden = false; $('retry-recordings').hidden = false; } throw error; }
+  try { data = await api(path); } catch (error) { if (requestId === state.segmentRequestId) { const empty = $('timeline').querySelector('.timeline-empty'); updatePreviewPlaceholder('录像列表读取失败', '使用下方的重试按钮重新载入'); empty.textContent = '读取失败，请重试。'; empty.hidden = false; $('retry-recordings').hidden = false; } throw error; }
   finally { if (requestId === state.segmentRequestId) { loadButton.disabled = false; loadButton.textContent = '载入录像 ↻'; } }
   if (requestId !== state.segmentRequestId) return;
   state.segments = (data.segments || []).slice().sort((a, b) => segmentBounds(a).start - segmentBounds(b).start);
@@ -610,6 +624,8 @@ async function loadSegments({ preserveRange = false, keepLive = false } = {}) {
   });
   state.cursorMs = preferredSegment ? preferredCursor : state.segments.length ? segmentBounds(state.segments[0]).start : dateStart(state.date);
   if (state.cursorMs !== null) setTimelineWindow(state.cursorMs); else renderTimeline();
+  if (state.segments.length) updatePreviewPlaceholder('录像已就绪', '点播放开始回看，或在时间尺上选择位置');
+  else updatePreviewPlaceholder('这一天没有录像', '可以切换日期或镜头');
   const emptyNotice = !state.segments.length && typeof data.notice === 'string' ? data.notice : '';
   if (emptyNotice) $('timeline').querySelector('.timeline-empty').textContent = emptyNotice;
   setPlaybackNotice(emptyNotice || (state.segments.length
@@ -1504,6 +1520,9 @@ function updateOutputSort() {
   const oldest = state.outputSort === 'oldest';
   const button = $('output-sort'); button.dataset.order = oldest ? 'oldest' : 'newest';
   setButtonIcon(button, oldest ? 'sort-oldest' : 'sort-newest', oldest ? '成片排序：最早在前，点击切换为最新在前' : '成片排序：最新在前，点击切换为最早在前');
+  const label = document.createElement('span');
+  label.textContent = oldest ? '最早在前' : '最新在前';
+  button.append(label);
 }
 function toggleOutputSort() {
   state.outputSort = state.outputSort === 'oldest' ? 'newest' : 'oldest';
@@ -1512,11 +1531,12 @@ function toggleOutputSort() {
 function renderOutputs() {
   outputDetail?.update(state.outputs.find(file => file.id === outputDetail.id));
   const list = $('output-list'); $('output-count').textContent = String(state.outputs.length);
-  const count = state.outputs.length, bytes = state.outputs.reduce((sum, file) => sum + Number(file.size || 0), 0);
-  $('library-summary').textContent = `${count} 个视频`; $('library-size').textContent = prettyBytes(bytes);
+  const count = state.outputs.length;
   const query = ($('output-search')?.value || '').trim().toLocaleLowerCase();
   const oldestFirst = state.outputSort === 'oldest';
   const visible = state.outputs.filter(file => file.filename.toLocaleLowerCase().includes(query)).sort((a, b) => (new Date(b.modifiedAt) - new Date(a.modifiedAt)) * (oldestFirst ? -1 : 1));
+  $('library-size').textContent = prettyBytes(visible.reduce((sum, file) => sum + Number(file.size || 0), 0));
+  $('library-summary').textContent = query ? `匹配 ${visible.length} / ${count} 个视频` : `${count} 个视频`;
   outputPlayers.retain(visible.map(file => file.id));
   const keep = new Set(visible.map(file => file.id));
   for (const [id, card] of outputCards) if (!keep.has(id)) { card.remove(); outputCards.delete(id); }
@@ -1524,7 +1544,7 @@ function renderOutputs() {
     list.replaceChildren();
     outputFeed = createCollectionFeed({ list, scroller: $('library-scroll'), sentinel: $('output-sentinel'), document,
       groupDates: false, decorateTime: false, compare: () => 0, makeCard: makeOutputCard,
-      emptyText: '没有匹配的成片', isVisible: () => document.body.dataset.view === 'library' });
+      emptyText: () => state.outputs.length ? '没有匹配的成片，试试其他文件名。' : '暂无成片。在回放页标记入点和出点后即可导出。', isVisible: () => document.body.dataset.view === 'library' });
   }
   const filter = `${query}:${state.outputSort}`;
   if (outputFilter !== filter) { outputFeed.reset(); outputFilter = filter; }
@@ -1633,6 +1653,10 @@ function openOutputDetails(file) {
     });
   });
   remove.classList.add('danger-button'); remove.disabled = Boolean(current.busy);
+  for (const [control, text] of [[download.element, '下载'], [uploadButtons.get('cloud189'), '传至189'], [uploadButtons.get('bilibili'), '传至B站'], [remove, '删除']]) {
+    const caption = document.createElement('span'); caption.textContent = text;
+    control.append(caption);
+  }
   const detail = { id: current.id, sheet, close: () => sheet.close(), update(next) {
     if (!next) { sheet.close(); return; }
     current = next; name.textContent = current.filename; download.update(current);
@@ -1789,7 +1813,11 @@ function makeTaskCard(task, uploadTask) {
     card.append(timing);
   }
   if (progress.show) { const track = document.createElement('div'); track.setAttribute('role', 'progressbar'); track.setAttribute('aria-label', taskStageLabel(task) || statusText(task.status)); track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100'); if (progress.hasPercent) track.setAttribute('aria-valuenow', String(progress.percent)); track.className = `progress-track${progress.indeterminate ? ' indeterminate' : progress.hasPercent ? '' : ' waiting'}`; if (progress.indeterminate) track.setAttribute('aria-valuetext', taskStageLabel(task) || (task.status === 'uploading' ? '等待上传进度回报' : '正在处理'));  const fill = document.createElement('div'); fill.className = 'progress-fill'; if (progress.hasPercent) fill.style.width = `${progress.percent}%`; track.append(fill); card.append(track); }
-  const footer = document.createElement('div'); footer.className = `task-footer${task.provider === 'cloud189' && task.status === 'unknown' ? ' recovery-actions' : ''}`; const left = document.createElement('span'); left.textContent = ({ mediamtx: 'MediaMTX', hikvision: '录像机', cloud189: '189', bilibili: 'B站' })[task.source || task.provider] || task.kind || ''; const right = document.createElement('span');
+  const footer = document.createElement('div');
+  footer.className = `task-footer${task.provider === 'cloud189' && task.status === 'unknown' ? ' recovery-actions' : ''}`;
+  const left = document.createElement('span');
+  left.textContent = ({ mediamtx: 'MediaMTX', hikvision: '录像机', cloud189: '189', bilibili: 'B站' })[task.source || task.provider] || task.kind || '';
+  const right = document.createElement('span');
   const speed = Number(task.speed ?? task.uploadSpeed); const updatedAt = Number(task.speedUpdatedAt || task.progressUpdatedAt || 0); const fresh = Date.now() - (updatedAt < 1e12 ? updatedAt * 1000 : updatedAt) < 6000; right.textContent = uploadTask ? uploadProgressCaption(task) : task.status === 'queued' || task.status === 'pending' || task.status === 'draft' ? '' : fresh && speed > 0 ? `${(speed * 8 / 1e6).toFixed(1)} Mbps` : task.stage ? taskProgressCaption(task) : progress.hasPercent ? `${Math.round(progress.percent)}%` : uploadTask && task.status === 'uploading' ? '进度不可用' : '';
   footer.append(left, right);
   if (!uploadTask && task.status === 'error' && task.source === 'hikvision' && task.dvrHttpSampleAvailable === true) {
@@ -1860,7 +1888,12 @@ function presentTaskCard(task, upload) {
 function appendTransferPresentation(card, task, upload) {
   const running = ['downloading', 'uploading', 'converting', 'stopping', 'reconciling'].includes(task.status);
   card.classList.toggle('task-working', running); card.classList.toggle('task-verification', upload && ['unknown', 'needs-confirmation'].includes(task.status) && !task.archivedAt);
-  if (upload) { const target = document.createElement('span'); target.className = 'task-target'; target.innerHTML = iconSvg(task.provider === 'bilibili' ? 'tv' : 'cloud'); target.append(document.createTextNode(task.provider === 'bilibili' ? 'B站' : '189')); card.querySelector('.task-footer').prepend(target); }
+  if (upload) {
+    const target = card.querySelector('.task-footer > span');
+    target.className = 'task-target';
+    target.innerHTML = iconSvg(task.provider === 'bilibili' ? 'tv' : 'cloud');
+    target.append(document.createTextNode(task.provider === 'bilibili' ? 'B站' : task.provider === 'cloud189' ? '189' : task.provider || '上传'));
+  }
   if (!running) return;
   const progress = taskProgressPresentation(task), sample = transferSampler.sample(task, Date.now() + (state.serverClockOffset || 0));
   const stats = document.createElement('div'); stats.className = 'task-transfer-stats mono';
@@ -2054,8 +2087,8 @@ function trackSettingsView(key, sheet, redraw) {
 function configNotice(parent) {
   const notice = document.createElement('p'); notice.className = 'config-notice'; notice.setAttribute('role', 'status'); notice.textContent = $('config-preparation').textContent; parent.append(notice); return notice;
 }
-function configSheet(title, description, inline = false, initialDirty = false) {
-  const sheet = inline ? openSettingsContainer(title, description, { initialDirty }) : openDialog(title, description, { initialDirty });
+function configSheet(title, description, settingsKey = null, initialDirty = false, { focusHeading = true } = {}) {
+  const sheet = settingsKey ? openSettingsContainer(title, description, { key: settingsKey, initialDirty, focusHeading }) : openDialog(title, description, { initialDirty });
   if (!sheet) return null;
   sheet.dialog.classList.add('config-dialog');
   sheet.context = { revision: consoleConfig?.revision, pending: false };
@@ -2118,6 +2151,7 @@ function openDvrEditor(dvr = null, draft = null) {
   const saved = dvr && consoleConfig.dvrs.find(item => item.id === dvr.id);
   const values = draft || saved || {};
   const sheet = configSheet(dvr ? '编辑录像机' : '添加录像机', dvr ? '凭据只发送到服务器保存。不会播放、导出或启动录像。' : '保存前自动测试连接。失败时可修改重试，或明确选择仍然保存。');
+  sheet.dialog.classList.add('recorder-editor');
   const name = labelledInput(sheet.content, '名称', values.name || '', { maxLength: 100 });
   const ip = labelledInput(sheet.content, '主机地址', values.ip || '', { placeholder: '192.168.1.10，不含协议或端口', maxLength: 253 });
   const username = labelledInput(sheet.content, '用户名', values.username || '', { maxLength: 100 }); username.autocomplete = 'off';
@@ -2183,7 +2217,7 @@ function openRecorderActions(dvr) {
 }
 function openConfigDelete(title, description, path, method, values) {
   const sheet = configSheet(title, description);
-  addButton(sheet.actions, '取消', 'quiet-button', () => sheet.close());
+  addButton(sheet.actions, '取消', 'quiet-button', () => sheet.close()).focus?.({ preventScroll: true });
   addButton(sheet.actions, '确认删除', 'danger-button', () => runConfigAction(sheet, async () => {
     const result = await configRequest(path, method, values(), sheet.context.revision); acceptConsoleConfig(result); sheet.close(); notify('已删除。');
   }));
@@ -2265,6 +2299,7 @@ function openCameraEditor(camera = null, draft = null) {
 function renderDvrSettings(sheet) {
   const notice = configNotice(sheet.content);
   const bar = document.createElement('div'); bar.className = 'settings-toolbar';
+  const heading = document.createElement('h3'); heading.textContent = '设备列表'; bar.append(heading);
   const add = setButtonIcon(addButton(bar, '', 'quiet-button ui-icon-button', () => openDvrEditor()), 'add', '添加录像机');
   const refresh = addSettingsRefresh(bar, sheet, loadConsoleConfig, '重新读取来源配置', '来源配置已刷新。');
   const list = document.createElement('div'); list.className = 'config-list';
@@ -2274,15 +2309,16 @@ function renderDvrSettings(sheet) {
     notice.hidden = !config?.preparationOnly; add.disabled = locked;
     list.replaceChildren();
     for (const dvr of config?.dvrs || []) list.append(createSettingsRow({ document, title: dvr.name, detail: dvr.ip, status: recorderChecks.get(dvr.id) || '', disabled: locked, onClick: () => openRecorderActions(dvr) }));
-    if (!config?.dvrs?.length) list.textContent = '还没有录像机';
+    if (!config) list.textContent = '设备列表尚未载入';
+    else if (!config.dvrs?.length) list.textContent = '还没有录像机';
   });
 }
-function openDvrSettings() {
-  const sheet = configSheet('海康录像机', '', true); if (!sheet) return null; renderDvrSettings(sheet); return sheet;
+function openDvrSettings(options) {
+  const sheet = configSheet('海康录像机', '', 'dvr', false, options); if (!sheet) return null; renderDvrSettings(sheet); return sheet;
 }
 function renderMediaMtxSettings(sheet, draft = null) {
   const notice = configNotice(sheet.content);
-  const input = labelledInput(sheet.content, 'Playback URL', draft ?? consoleConfig?.mediamtx?.playbackUrl ?? '', { placeholder: 'http://mediamtx:9996', maxLength: 2048 }); input.inputMode = 'url';
+  const input = labelledInput(sheet.content, '回放服务地址（Playback URL）', draft ?? consoleConfig?.mediamtx?.playbackUrl ?? '', { placeholder: 'http://mediamtx:9996', maxLength: 2048 }); input.inputMode = 'url';
   const help = document.createElement('p'); help.className = 'setting-help'; help.textContent = '只修改应用使用的回放服务地址，不修改录像根目录、SRT 或 MediaMTX 服务。'; sheet.content.append(help);
   // baseline 是输入框与服务器一致时的值；偏离它才算有未保存的修改。
   let baseline = consoleConfig?.mediamtx?.playbackUrl ?? '', armedDiscard = null;
@@ -2324,7 +2360,7 @@ function renderMediaMtxSettings(sheet, draft = null) {
   });
 }
 function openMediaMtxEditor(draft = null) {
-  const sheet = configSheet('MediaMTX', '', true, draft !== null); if (!sheet) return null; renderMediaMtxSettings(sheet, draft); return sheet;
+  const sheet = configSheet('MediaMTX', '', 'mediamtx', draft !== null); if (!sheet) return null; renderMediaMtxSettings(sheet, draft); return sheet;
 }
 // 设置首页一行的数值与状态图标（✓ 绿 / ⚠ 琥珀）；状态必须同时有图标和可读标签。
 function setSettingsRow(key, { value = '', tone = '', label = '' } = {}) {
@@ -2474,11 +2510,13 @@ function renderPasswordSettings(sheet) {
   mountSettingsPanel(sheet, 'password-card');
   sheet.dialog.addEventListener('close', () => { $('password-form').reset(); $('password-message').textContent = ''; });
 }
-function openSettingsContainer(title, description = '', { trackChanges = true, initialDirty = false } = {}) {
+function openSettingsContainer(title, description = '', { key, trackChanges = true, initialDirty = false, focusHeading = true } = {}) {
   const host = $('settings-desktop-detail');
   if (!window.matchMedia?.('(min-width: 1024px)').matches || !host) return openDialog(title, description, { trackChanges, initialDirty });
   if (settingsInline && !settingsInline.requestClose(`settings:${title}`)) return null;
   const dialog = document.createElement('section'); dialog.className = 'settings-inline'; dialog.open = true;
+  const row = key ? $(`settings-open-${key}`) : null;
+  row?.setAttribute('aria-current', 'true'); row?.setAttribute('aria-controls', 'settings-desktop-detail');
   const heading = document.createElement('h2'); heading.textContent = title; heading.tabIndex = -1;
   const content = document.createElement('div'); content.className = 'dialog-body';
   if (description) { const note = document.createElement('p'); note.textContent = description; content.append(note); }
@@ -2491,6 +2529,7 @@ function openSettingsContainer(title, description = '', { trackChanges = true, i
     close() {
       if (closed) return; closed = true;
       if (settingsInline === sheet) settingsInline = null;
+      row?.removeAttribute('aria-current'); row?.removeAttribute('aria-controls');
       dialog.open = false; dialog.dispatchEvent(new Event('close')); dialog.remove();
       if (shell?.dialog.open) shell.close();
     },
@@ -2523,19 +2562,21 @@ function openSettingsContainer(title, description = '', { trackChanges = true, i
     },
   };
   dialog.addEventListener('input', () => { if (trackChanges) { dirty = true; armed = null; } });
-  settingsInline = sheet; heading.focus({ preventScroll: true }); return sheet;
+  settingsInline = sheet;
+  if (focusHeading) heading.focus({ preventScroll: true });
+  return sheet;
 }
 window.addEventListener('resize', () => settingsInline?.adapt());
-function openSettingsPanel(title, render) {
-  const sheet = openSettingsContainer(title, '', { trackChanges: false }); if (!sheet) return null;
+function openSettingsPanel(title, render, key) {
+  const sheet = openSettingsContainer(title, '', { key, trackChanges: false }); if (!sheet) return null;
   sheet.dialog.classList.add('settings-dialog'); render(sheet); return sheet;
 }
 const settingsDetails = {
   dvr: openDvrSettings,
   mediamtx: openMediaMtxEditor,
-  cloud189: () => openSettingsPanel('189', renderCloud189Settings),
-  bilibili: () => openSettingsPanel('B站', renderBilibiliSettings),
-  password: () => openSettingsPanel('访问密码', renderPasswordSettings),
+  cloud189: () => openSettingsPanel('189', renderCloud189Settings, 'cloud189'),
+  bilibili: () => openSettingsPanel('B站', renderBilibiliSettings, 'bilibili'),
+  password: () => openSettingsPanel('访问密码', renderPasswordSettings, 'password'),
 };
 for (const row of document.querySelectorAll('[data-settings-open]')) row.addEventListener('click', () => settingsDetails[row.dataset.settingsOpen]());
 
@@ -2618,7 +2659,7 @@ function renameOutput(file) {
 }
 function confirmAction(title, description, label, action) {
   const sheet = openDialog(title, description);
-  addButton(sheet.actions, '取消', 'quiet-button', () => sheet.close());
+  addButton(sheet.actions, '取消', 'quiet-button', () => sheet.close()).focus?.({ preventScroll: true });
   const confirm = addButton(sheet.actions, label, 'danger-button', async () => {
     sheet.setPending(true); confirm.textContent = '正在处理…';
     try { await action(); sheet.close(); } catch (error) { sheet.setPending(false); confirm.textContent = label; sheet.error.textContent = error.message; }

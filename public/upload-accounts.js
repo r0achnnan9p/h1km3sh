@@ -101,7 +101,7 @@ export function createUploadAccounts({ document = globalThis.document, request, 
   }
   function disconnectAccount(provider) {
     const sheet = openDialog(`断开${PROVIDERS[provider]}账号？`, '将删除此服务器保存的该平台登录令牌，断开后无法继续上传。已有排队任务不会自动转给重新连接的账号，需要重新提交。已上传到平台的文件不会删除。', { trackChanges: false });
-    button(sheet.actions, '保留连接', 'quiet-button', () => sheet.close());
+    button(sheet.actions, '保留连接', 'quiet-button', () => sheet.close()).focus?.({ preventScroll: true });
     const confirm = button(sheet.actions, '断开并删除登录', 'danger-button', async () => {
       if (confirm.disabled) return; sheet.setPending(true); sheet.error.textContent = ''; const epoch = lifecycle;
       try {
