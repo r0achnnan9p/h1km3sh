@@ -140,7 +140,8 @@ test('dialog follows keyboard visual viewport, preserves editing selection, and 
   const listeners = new Map(), windowListeners = new Map(), dialogListeners = new Map(), frames = new Map();
   const viewport = { height: 800, offsetTop: 0, addEventListener: (key, fn) => listeners.set(key, fn), removeEventListener: key => listeners.delete(key) };
   const properties = {}, input = { matches: () => true, getBoundingClientRect: () => ({ top: 620, bottom: 666 }), selectionStart: 2, selectionEnd: 2 };
-  const dialog = { style: { setProperty: (key, value) => { properties[key] = value; } }, contains: node => node === input, scrollTop: 0, getBoundingClientRect: () => ({ top: 500, bottom: 780 }), querySelector: () => ({ getBoundingClientRect: () => ({ top: 700 }) }), addEventListener: (key, fn) => dialogListeners.set(key, fn), removeEventListener: key => dialogListeners.delete(key) };
+  const content = { scrollTop: 0, contains: node => node === input, getBoundingClientRect: () => ({ top: 500, bottom: 700 }) };
+  const dialog = { style: { setProperty: (key, value) => { properties[key] = value; } }, contains: node => node === input, querySelector: () => content, addEventListener: (key, fn) => dialogListeners.set(key, fn), removeEventListener: key => dialogListeners.delete(key) };
   const h = vm.createContext({ setButtonIcon, createSettingsRow, window: { visualViewport: viewport, innerHeight: 800, addEventListener: (key, fn) => windowListeners.set(key, fn), removeEventListener: key => windowListeners.delete(key) }, document: { activeElement: input }, requestAnimationFrame: fn => { frames.set(1, fn); return 1; }, cancelAnimationFrame: id => frames.delete(id) });
   vm.runInContext(script.slice(script.indexOf('function fitDialogViewport('), script.indexOf('function labelledInput(')), h);
   const cleanup = h.fitDialogViewport(dialog);
@@ -148,15 +149,15 @@ test('dialog follows keyboard visual viewport, preserves editing selection, and 
   assert.equal(frames.size, 1); frames.get(1)(); frames.clear();
   assert.equal(properties['--dialog-viewport-top'], '20px'); assert.equal(properties['--dialog-viewport-height'], '420px'); assert.equal(properties['--dialog-keyboard-inset'], '360px');
   assert.equal(input.selectionStart, 2); assert.equal(input.selectionEnd, 2);
-  dialog.querySelector = () => ({ getBoundingClientRect: () => ({ top: 630 }) });
-  dialogListeners.get('focusin')(); frames.get(1)(); frames.clear(); assert.equal(dialog.scrollTop, 48);
+  content.getBoundingClientRect = () => ({ top: 500, bottom: 630 });
+  dialogListeners.get('focusin')(); frames.get(1)(); frames.clear(); assert.equal(content.scrollTop, 48);
   dialogListeners.get('focusin')(); cleanup(); assert.equal(frames.size, 0); assert.equal(listeners.size, 0); assert.equal(windowListeners.size, 0); assert.equal(dialogListeners.size, 0);
 });
 
 test('keyboard avoidance also applies to desktop and landscape dialog centering', () => {
   const css = fs.readFileSync(new URL('../public/console.css', import.meta.url), 'utf8');
   assert.match(css, /\.console-app \.app-dialog \{ position: fixed; inset: var\(--dialog-viewport-top, 0px\) 0 var\(--dialog-keyboard-inset, 0px\)/);
-  assert.match(css, /max-height: calc\(var\(--dialog-viewport-height, 100dvh\) - 48px\)/);
+  assert.match(css, /max-height: calc\(min\(100dvh, var\(--dialog-viewport-height, 100dvh\)\) - 48px\)/);
 });
 
 test('library tools remove visible field labels and keep one-row search/icon sorting', () => {

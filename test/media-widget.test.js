@@ -69,6 +69,18 @@ test('组件接收图片与视频结果，保留签名，拒绝外部地址，�
       video.muted = false;
       send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl } } });
       assert.equal(nodes.media.children[0], video); assert.equal(video.muted, false);
+
+      const batch = { status: 'completed', total: 1, files: [{ filename: '回放.mp4', artifactUrl }] };
+      send({ method: 'ui/notifications/tool-result', params: { structuredContent: batch } });
+      assert.equal(nodes.media.children[0].tagName, 'A');
+      assert.equal(nodes.media.children[0].href, artifactUrl);
+      assert.equal(nodes.link.hidden, true);
+
+      send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl } } });
+      assert.equal(nodes.media.children[0].tagName, 'VIDEO', '同一个文件重新作为单段结果时恢复播放器');
+      assert.equal(nodes.media.children[0].src, artifactUrl);
+      assert.notEqual(nodes.media.children[0], video);
+      assert.equal(nodes.link.hidden, false);
     }
     else assert.equal(nodes.media.children.length, 0);
   }

@@ -187,7 +187,17 @@ export function createCollectionFeed({ list, scroller, sentinel, makeCard, creat
         if (archiveGroup.children[archiveIndex] !== card) archiveGroup.insertBefore(card, archiveGroup.children[archiveIndex] || null); archiveIndex++;
       } else ordered.push(card);
     }
-    if (!visible.length) { const id = 'empty'; wanted.add(id); let empty = nodes.get(id); if (!empty) { empty = document.createElement('p'); empty.className = 'empty-card'; empty.textContent = emptyText; nodes.set(id,empty); } ordered.push(empty); }
+    if (!visible.length) {
+      wanted.add('empty');
+      let empty = nodes.get('empty');
+      if (!empty) {
+        empty = document.createElement('p');
+        empty.className = 'empty-card';
+        nodes.set('empty', empty);
+      }
+      empty.textContent = typeof emptyText === 'function' ? emptyText() : emptyText;
+      ordered.push(empty);
+    }
     for (const [id,node] of nodes) if (!wanted.has(id)) { node.remove(); nodes.delete(id); }
     ordered.forEach((node,index) => { if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null); });
     sentinel.hidden = limit >= tasks.length;

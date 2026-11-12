@@ -1,3 +1,4 @@
+import { statusDashboardPage } from '../lib/status-dashboard.js';
 import { createOutputDownload } from '../public/output-download.js';
 import { setButtonIcon, createSettingsRow, iconSvg } from '../public/ui-primitives.js';
 import { test } from 'node:test';
@@ -88,17 +89,18 @@ test('upload and more are separate accessible SVG actions with separate menus an
   assert.match(css, /\.ui-icon-button \{[^}]*min-height: 44px/);
 });
 
-test('desktop navigation is a narrow icon rail with accessible names and unchanged mobile navigation', async () => {
-  const { statusDashboardPage } = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
-  const nav = html.slice(html.indexOf('<aside class="side-nav"'), html.indexOf('</aside>'));
-  assert.ok(!nav.includes('工作空间')); assert.ok(!nav.includes('<strong>H1kM3sh'));
-  for (const label of ['回放', '成片', '任务', '设置']) { assert.ok(nav.includes(`aria-label="${label}" title="${label}"`)); assert.ok(!nav.includes(`</span>${label}`)); }
-  assert.match(nav, /id="output-count" hidden/);
-  const css = fs.readFileSync(new URL('../public/console.css', import.meta.url), 'utf8');
-  assert.match(css, /--sidebar: 72px/); assert.doesNotMatch(css, /--sidebar: (218|184)px/);
-  assert.match(html, /id="mobile-nav"/);
+test('both navigation surfaces pair all four icons with visible names and one task badge', () => {
+  const html = statusDashboardPage();
+  const menus = [html.match(/<aside class="side-nav"[\s\S]*?<\/aside>/)[0], html.match(/<nav class="mobile-nav"[\s\S]*?<\/nav>/)[0]];
+  for (const nav of menus) {
+    for (const label of ['回放', '成片', '任务', '设置']) {
+      assert.ok(nav.includes(`aria-label="${label}" title="${label}"`));
+      assert.ok(nav.includes(`class="nav-label" aria-hidden="true">${label}</b>`));
+    }
+    assert.equal((nav.match(/data-task-count/g) || []).length, 1);
+  }
+  assert.match(menus[0], /id="output-count" hidden/);
 });
-
 
 test('task headings stay compact and all phone orientations honor system safe areas once', async () => {
   const { statusDashboardPage } = await import('../lib/status-dashboard.js'); const html = statusDashboardPage();
@@ -126,7 +128,7 @@ test('time sort toggles newest/oldest directly, preserves search, and never open
   assert.equal(h.$('output-sort').getAttribute('aria-label'), '成片排序：最早在前，点击切换为最新在前');
   assert.notEqual(h.$('output-sort').innerHTML, down);
   h.$('output-search').value = 'Match 2'; h.context.renderOutputs(); h.context.toggleOutputSort();
-  assert.deepEqual(ids(), ['file-2']); assert.equal(h.$('output-search').value, 'Match 2'); assert.equal(h.$('output-sort').innerHTML, down);
+  assert.deepEqual(ids(), ['file-2']); assert.equal(h.$('library-summary').textContent, '匹配 1 / 4 个视频'); assert.equal(h.$('output-search').value, 'Match 2'); assert.equal(h.$('output-sort').innerHTML, down);
   assert.doesNotMatch(script, /enhanceSelect\(\$\('output-sort'\)/); assert.doesNotMatch(script, /sort === 'name'|sort === 'largest'/);
 });
 

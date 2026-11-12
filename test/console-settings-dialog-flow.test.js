@@ -155,10 +155,13 @@ test('draft resume keeps an already valid old revision and never upgrades it, so
 test('桌面复用设置渲染与保存上下文，切换前保护未保存字段及pending',async()=>{
  const h=harness(async()=>config(),{desktop:true});h.context.acceptConsoleConfig(config());
  const sheet=h.context.openMediaMtxEditor();assert.equal(h.dialogs().length,0);assert.equal(sheet.dialog.parentNode,h.$('settings-desktop-detail'));
+ assert.equal(h.$('settings-open-mediamtx').attributes['aria-current'], 'true');
  const input=sheet.dialog.querySelectorAll('input')[0];input.value='http://changed.test:9996';await input.emit('input');
  assert.equal(h.context.openDvrSettings(),null);assert.equal(input.value,'http://changed.test:9996');
  sheet.setPending(true);assert.equal(h.context.openDvrSettings(),null);sheet.setPending(false);
  const next=h.context.openDvrSettings();assert.ok(next);assert.equal(sheet.dialog.open,false);assert.equal(next.dialog.parentNode,h.$('settings-desktop-detail'));
+ assert.equal(h.$('settings-open-mediamtx').attributes['aria-current'], undefined);
+ assert.equal(h.$('settings-open-dvr').attributes['aria-current'], 'true');
 });
 test('桌面详情缩窄时移动原输入进原生弹层，关闭清理原容器',async()=>{
  const h=harness(async()=>config(),{desktop:true});h.context.acceptConsoleConfig(config());

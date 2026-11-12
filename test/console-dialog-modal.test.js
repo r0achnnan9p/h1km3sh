@@ -13,10 +13,11 @@ function harness({ showFails = false } = {}) {
     remove() { this.isConnected = false; if (this.parent) this.parent.children = this.parent.children.filter(n => n !== this); }
     contains(node) { return node === this || this.children.some(child => child.contains(node)); }
     matches() { return false; }
+    setPointerCapture() {}
     setAttribute() {}
     addEventListener(k,f) { (this.listeners[k] ||= []).push(f); }
     removeEventListener(k,f) { this.listeners[k] = (this.listeners[k] || []).filter(x => x !== f); }
-    emit(k, target = this) { for (const f of this.listeners[k] || []) f({ target, preventDefault() {} }); }
+    emit(k, target = this, fields = {}) { for (const f of this.listeners[k] || []) f({ target, preventDefault() {}, ...fields }); }
     focus(options) { document.activeElement = this; this.focusOptions = options; }
     showModal() { if (showFails) throw new Error('modal unavailable'); this.open = true; }
     close() { if (this.open) { this.open = false; closes.push(() => this.emit('close')); } }
@@ -25,7 +26,7 @@ function harness({ showFails = false } = {}) {
   const root = new Node('html'); root.clientHeight = 873;
   const previous = new Node('button');
   document = { documentElement: root, body: new Node('body'), activeElement: previous, createElement: tag => new Node(tag), querySelector: () => previous };
-  const window = { innerHeight: 932, scrollX: 0, scrollY: 150, scrollTo: (x,y) => scrolls.push([x,y]), addEventListener() {}, removeEventListener() {} };
+  const window = { innerHeight: 932, matchMedia: () => ({ matches: true }), scrollX: 0, scrollY: 150, scrollTo: (x,y) => scrolls.push([x,y]), addEventListener() {}, removeEventListener() {} };
   const context = vm.createContext({ iconSvg, document, window, requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
   vm.runInContext(source, context);
   return { context, document, root, previous, closes, scrolls };
@@ -63,4 +64,20 @@ test('a file picker cancel bubbling from an input cannot dismiss its settings di
   assert.equal(sheet.dialog.open, true); assert.equal(h.closes.length, 0);
   assert.ok(h.root.classList.contains('dialog-scroll-locked'));
   sheet.dialog.emit('cancel'); assert.equal(sheet.dialog.open, false);
+});
+
+test('a phone sheet pull dismisses clean content and keeps edits until explicit discard', () => {
+  const h = harness();
+  const pull = sheet => {
+    const head = sheet.dialog.children[0];
+    const start = { isPrimary: true, pointerType: 'touch', pointerId: 1, clientX: 60, clientY: 20 };
+    head.emit('pointerdown', head, start);
+    head.emit('pointerup', head, { ...start, clientY: 100 });
+  };
+  const clean = h.context.openDialog('设置');
+  pull(clean); assert.equal(clean.dialog.open, false); h.closes.shift()();
+  const dirty = h.context.openDialog('编辑', '', { initialDirty: true });
+  pull(dirty); pull(dirty);
+  assert.equal(dirty.dialog.open, true); assert.match(dirty.error.textContent, /未保存/);
+  dirty.dialog.children[0].children[1].emit('click'); assert.equal(dirty.dialog.open, false);
 });

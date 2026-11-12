@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const script = fs.readFileSync(new URL('../public/console.js', import.meta.url), 'utf8');
-const markup = fs.readFileSync(new URL('../lib/status-dashboard.js', import.meta.url), 'utf8');
+import { statusDashboardPage } from '../lib/status-dashboard.js';
+const markup = statusDashboardPage();
 const option = (value, textContent, disabled = false) => ({ value, textContent, disabled, cloneNode() { return option(value, textContent, disabled); } });
 function harness() {
  const nodes = Object.fromEntries(['playback-source', 'camera-select', 'dvr-channel', 'dvr-select', 'quick-source-select', 'quick-camera-select', 'playback-context', 'playback-context-date', 'date-select', 'player-source-label', 'go-live'].map(id => [id, {value:'',options:[],dataset:{},attrs:{},events:[],replaceChildren(...options){this.options=options;},setAttribute(key,value){this.attrs[key]=value;},dispatchEvent(event){this.events.push(event.type);},focus(){this.focused=true;},get selectedOptions(){return this.options.filter(o=>o.value===this.value);}}]));

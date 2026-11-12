@@ -3,6 +3,7 @@ import { iconSvg } from './ui-primitives.js';
 // closing is explicit so touching outside a sheet never discards an edit.
 export let activeDialog = null;
 const CLOSE_ICON = iconSvg('clear');
+let nextDialogId = 0;
 // Keep the document fixed while any native dialog is open, including replacements.
 const backgroundDialogs = new Set();
 let backgroundScroll = null;
@@ -29,24 +30,52 @@ export function openDialog(title, description = '', { trackChanges = true, initi
   activeDialog?.close();
   const previous = document.activeElement;
   const dialog = document.createElement('dialog'); dialog.className = 'app-dialog';
-  dialog.setAttribute('aria-labelledby', 'dialog-title');
+  const titleId = `dialog-title-${++nextDialogId}`;
+  dialog.setAttribute('aria-labelledby', titleId);
   const head = document.createElement('div'); head.className = 'dialog-head';
-  const heading = document.createElement('h2'); heading.id = 'dialog-title'; heading.textContent = title; heading.tabIndex = -1;
+  const heading = document.createElement('h2'); heading.id = titleId; heading.textContent = title; heading.tabIndex = -1;
   const closeButton = document.createElement('button'); closeButton.type = 'button'; closeButton.className = 'icon-button dialog-close'; closeButton.title = '关闭'; closeButton.innerHTML = CLOSE_ICON; closeButton.setAttribute('aria-label', '关闭');
   head.append(heading, closeButton);
   const content = document.createElement('div'); content.className = 'dialog-body';
   const copy = document.createElement('p'); copy.className = 'dialog-description'; copy.textContent = description; copy.hidden = !description; content.append(copy);
+  if (description) { copy.id = `${titleId}-description`; dialog.setAttribute('aria-describedby', copy.id); }
   const error = document.createElement('p'); error.className = 'dialog-error'; error.setAttribute('role', 'alert');
   const actions = document.createElement('div'); actions.className = 'dialog-actions';
   dialog.append(head, content, error, actions); document.body.append(dialog);
   let pending = false, dirty = Boolean(initialDirty), discardRequested = false; const disabledBeforePending = new Map();
-  const close = () => {
+  const close = (allowDiscard = true) => {
     if (pending) return;
-    if (dirty && !discardRequested) { discardRequested = true; error.textContent = '有未保存的修改，再次关闭将放弃修改。'; closeButton.textContent = '放弃'; return; }
+    if (dirty && (!discardRequested || !allowDiscard)) {
+      discardRequested = true; error.textContent = '有未保存的修改，再次关闭将放弃修改。';
+      closeButton.textContent = '放弃'; closeButton.title = '放弃修改'; closeButton.setAttribute('aria-label', closeButton.title);
+      return;
+    }
     dialog.close();
   };
-  dialog.addEventListener('input', () => { if (!trackChanges) return; dirty = true; discardRequested = false; closeButton.innerHTML = CLOSE_ICON; });
-  closeButton.addEventListener('click', close);
+  dialog.addEventListener('input', () => {
+    if (!trackChanges) return;
+    dirty = true;
+    if (discardRequested) {
+      discardRequested = false; error.textContent = '';
+      closeButton.innerHTML = CLOSE_ICON; closeButton.title = '关闭'; closeButton.setAttribute('aria-label', closeButton.title);
+    }
+  });
+  closeButton.addEventListener('click', () => close());
+  // Only a deliberate pull on the title area dismisses a phone sheet. Scrolling
+  // the form never dismisses it, and repeated pulls never discard a draft.
+  let pull = null;
+  head.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch' || !event.isPrimary || closeButton.contains(event.target) || !window.matchMedia('(max-width: 600px)').matches) return;
+    pull = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    head.setPointerCapture(event.pointerId);
+  });
+  head.addEventListener('pointerup', event => {
+    if (pull?.id !== event.pointerId) return;
+    const vertical = event.clientY - pull.y, horizontal = Math.abs(event.clientX - pull.x);
+    pull = null;
+    if (vertical >= 64 && vertical > horizontal * 2) close(false);
+  });
+  head.addEventListener('lostpointercapture', () => { pull = null; });
   dialog.addEventListener('cancel', event => { if (event.target !== dialog) return; event.preventDefault(); close(); });
   const releaseBackground = lockDialogBackground(dialog);
   const detachViewport = fitDialogViewport(dialog);
@@ -78,11 +107,11 @@ export function fitDialogViewport(dialog) {
     dialog.style.setProperty('--dialog-keyboard-inset', `${bottom}px`);
     const focused = document.activeElement;
     if (focused && dialog.contains(focused) && focused.matches('input, textarea, select')) {
-      const field = focused.getBoundingClientRect(), box = dialog.getBoundingClientRect();
-      const actions = dialog.querySelector('.dialog-actions');
-      const floor = actions ? Math.min(box.bottom, actions.getBoundingClientRect().top) : box.bottom;
-      if (field.bottom > floor - 12) dialog.scrollTop += field.bottom - floor + 12;
-      else if (field.top < box.top + 12) dialog.scrollTop -= box.top + 12 - field.top;
+      const content = dialog.querySelector('.dialog-body');
+      if (!content?.contains(focused)) return;
+      const field = focused.getBoundingClientRect(), box = content.getBoundingClientRect();
+      if (field.bottom > box.bottom - 12) content.scrollTop += field.bottom - box.bottom + 12;
+      else if (field.top < box.top + 12) content.scrollTop -= box.top + 12 - field.top;
     }
   };
   const schedule = () => { if (frame === null && !closed) frame = requestAnimationFrame(update); };
