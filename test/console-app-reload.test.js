@@ -32,6 +32,8 @@ function harness() {
     changeQuickPlaybackSource() {}, refreshPlaybackChoices() {}, updatePlaybackContext() {},
     openDialog() { assert.fail('desktop settings must use the existing inline editor'); },
   });
+  const touch = fs.readFileSync(new URL('../public/touch-controls.js', import.meta.url), 'utf8');
+  vm.runInContext('let nextDialogId = 0;' + touch.slice(touch.indexOf('function addButton('), touch.indexOf('export function openDialog(')).replaceAll('export ', ''), context);
   vm.runInContext(source.slice(source.indexOf('function cancelReplayHold('), source.indexOf('function tryBufferedReplaySeek(')), context);
   vm.runInContext(source.slice(source.indexOf('function reloadApplication('), source.indexOf('async function boot(')), context);
   vm.runInContext(source.slice(source.indexOf('function openSettingsContainer('), source.indexOf('function openSettingsPanel(')), context);
@@ -57,8 +59,10 @@ test('dirty inline settings block the first reload and require the existing expl
   const h = harness(), sheet = h.context.openSettingsContainer('测试设置', '', { initialDirty: true });
   h.context.reloadApplication();
   assert.equal(h.replaced.length, 0); assert.equal(h.cancelled.length, 0); assert.equal(sheet.dialog.open, true);
-  assert.match(sheet.error.textContent, /未保存.*再次选择/);
+  assert.match(sheet.error.textContent, /未保存/);
   h.context.reloadApplication();
+  assert.equal(h.replaced.length, 0); assert.equal(sheet.dialog.open, true);
+  sheet.dialog.querySelectorAll('button').find(node => node.textContent === '放弃修改').dispatchEvent(new Event('click'));
   assert.equal(sheet.dialog.open, false); assert.equal(h.replaced.length, 1); assert.equal(h.cancelled.length, 1);
 });
 

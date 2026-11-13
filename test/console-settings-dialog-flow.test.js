@@ -11,6 +11,7 @@ class Node {
   append(...nodes) { for (const node of nodes) { node.remove(); node.parentNode = this; this.children.push(node); } }
   replaceChildren(...nodes) { this.children.forEach(child => { child.parentNode = null; }); this.children = []; this.append(...nodes); }
   remove() { if (this.parentNode) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); this.parentNode = null; } }
+  contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; delete this[name]; }
   addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); }
@@ -18,6 +19,7 @@ class Node {
   removeEventListener(type, handler) { this.listeners[type] = (this.listeners[type] || []).filter(item => item !== handler); }
   async emit(type) { for (let node = this; node; node = node.parentNode) for (const handler of node.listeners[type] || []) await handler({ target: this }); }
   click() { return this.disabled ? undefined : this.emit('click'); }
+  querySelector() { return null; }
   focus() {} select() {} setSelectionRange() {}
   querySelectorAll(selector) { const tags = selector.split(',').map(part => part.trim()); return this.children.flatMap(child => [...(tags.includes(child.tag) ? [child] : []), ...child.querySelectorAll(selector)]); }
   // 原生 <dialog>：close 同步派发 close 事件即可（真实浏览器是异步，不影响这里的顺序语义）。
@@ -38,6 +40,7 @@ function harness(request, { desktop = false } = {}) {
   vm.runInContext(script.slice(script.indexOf('// Configuration is fetched separately'), script.indexOf('function renderPasswordMode(')), context);
   // 与真实 loggedOut 相同的草稿挂起：登录失效时记下 configEditor.resume，并关闭当前弹层。
   vm.runInContext("var suspended = null; loggedOut = function (message) { logouts.push(message); if (configEditor) suspended = configEditor.resume; activeDialog?.close(); };", Object.assign(context, { logouts }));
+  vm.runInContext(script.slice(script.indexOf('const settingsDetails ='), script.indexOf("for (const row of document.querySelectorAll('[data-settings-open]')")), context);
   const dialogs = () => body.children.filter(node => node.tag === 'dialog' && node.open);
   return { context, $, body, requests, dialogs, logouts, resume: () => vm.runInContext('suspended', context)() };
 }
@@ -49,23 +52,21 @@ const addButtonOf = dialog => find(dialog, node => node.title === '手动补充�
 const channelRow = dialog => find(dialog, node => node.tag === 'button' && node.className.includes('settings-row'));
 const errorOf = dialog => dialog.children.find(node => node.className === 'dialog-error');
 
-test('dirty MediaMTX URL survives add/channel clicks; only an explicit second click on the same entry discards it', async () => {
+test('a dirty channel editor requires an explicit discard; repeating an entry never discards its URL', async () => {
   const h = harness(async () => config());
   h.context.acceptConsoleConfig(config()); h.context.openMediaMtxEditor();
-  let [detail] = h.dialogs(); assert.equal(titleOf(detail), 'MediaMTX'); assert.equal(urlInput(detail).value, 'http://media.test:9996');
-  // 未改动：入口直接打开，不拦截。
-  await addButtonOf(detail).click(); assert.equal(h.dialogs().length, 1); assert.equal(titleOf(h.dialogs()[0]), '手动补充通道'); assert.equal(detail.open, false);
+  let [detail] = h.dialogs();
+  await addButtonOf(detail).click();
+  assert.equal(titleOf(h.dialogs()[0]), '手动补充通道');
   h.context.openMediaMtxEditor(); [detail] = h.dialogs();
   const input = urlInput(detail); input.value = 'http://draft.test:9996'; await input.emit('input');
-  // 点击 + / 通道行：拦截，当前弹层与草稿保持不变，且没有发请求。
-  await addButtonOf(detail).click(); assert.equal(h.dialogs().length, 1); assert.equal(h.dialogs()[0], detail); assert.equal(input.value, 'http://draft.test:9996'); assert.match(errorOf(detail).textContent, /尚未保存/);
-  await channelRow(detail).click(); assert.equal(h.dialogs()[0], detail); assert.equal(titleOf(detail), 'MediaMTX');
-  // “取消”= 不再点第二次：改回去后不再算脏，入口直接放行；草稿在此之前一直保留。
-  assert.equal(input.value, 'http://draft.test:9996'); assert.equal(h.requests.length, 0);
-  // 明确放弃：同一入口连续第二次点击才切换，旧弹层关闭。
-  await channelRow(detail).click(); assert.equal(titleOf(h.dialogs()[0]), '通道名称与关联'); assert.equal(detail.open, false);
-  await h.dialogs()[0].querySelectorAll('button')[0].click();
-  h.context.openMediaMtxEditor(); assert.equal(urlInput(h.dialogs()[0]).value, 'http://media.test:9996');
+  await addButtonOf(detail).click(); await addButtonOf(detail).click();
+  assert.equal(h.dialogs()[0], detail); assert.match(errorOf(detail).textContent, /未保存/);
+  await find(detail, node => node.textContent === '继续编辑').click();
+  assert.equal(input.value, 'http://draft.test:9996');
+  await channelRow(detail).click(); await channelRow(detail).click(); assert.equal(detail.open, true);
+  await find(detail, node => node.textContent === '放弃修改').click();
+  assert.equal(titleOf(h.dialogs()[0]), '通道名称与关联'); assert.equal(detail.open, false);
   assert.equal(h.requests.length, 0);
 });
 test('editing again after the warning re-arms the guard; reverting to the saved URL is not dirty', async () => {
@@ -80,7 +81,7 @@ test('closing a dirty MediaMTX dialog still asks before discarding (real openDia
   h.context.acceptConsoleConfig(config()); h.context.openMediaMtxEditor(); const [detail] = h.dialogs(), input = urlInput(detail);
   input.value = 'http://draft'; await input.emit('input');
   const closeButton = detail.children[0].children[1]; await closeButton.click();
-  assert.equal(detail.open, true); assert.match(errorOf(detail).textContent, /未保存/); await closeButton.click(); assert.equal(detail.open, false);
+  assert.equal(detail.open, true); assert.match(errorOf(detail).textContent, /未保存/); await closeButton.click(); assert.equal(detail.open, true); await find(detail, node => node.textContent === '放弃修改').click(); assert.equal(detail.open, false);
 });
 test('config arriving late fills the same unedited sheet and the first save carries the loaded revision', async () => {
   const h = harness(async (url, options) => {
@@ -159,7 +160,9 @@ test('桌面复用设置渲染与保存上下文，切换前保护未保存字�
  const input=sheet.dialog.querySelectorAll('input')[0];input.value='http://changed.test:9996';await input.emit('input');
  assert.equal(h.context.openDvrSettings(),null);assert.equal(input.value,'http://changed.test:9996');
  sheet.setPending(true);assert.equal(h.context.openDvrSettings(),null);sheet.setPending(false);
- const next=h.context.openDvrSettings();assert.ok(next);assert.equal(sheet.dialog.open,false);assert.equal(next.dialog.parentNode,h.$('settings-desktop-detail'));
+ assert.equal(h.context.openDvrSettings(),null);assert.equal(sheet.dialog.open,true);
+ await find(sheet.dialog, node => node.textContent === '放弃修改').click();
+ const next=h.context.settingsInline;assert.ok(next);assert.equal(sheet.dialog.open,false);assert.equal(next.dialog.parentNode,h.$('settings-desktop-detail'));
  assert.equal(h.$('settings-open-mediamtx').attributes['aria-current'], undefined);
  assert.equal(h.$('settings-open-dvr').attributes['aria-current'], 'true');
 });
@@ -168,7 +171,7 @@ test('桌面详情缩窄时移动原输入进原生弹层，关闭清理原容�
  const sheet=h.context.openMediaMtxEditor(),input=sheet.dialog.querySelectorAll('input')[0];input.value='http://draft.test:9996';await input.emit('input');
  h.context.window.innerWidth=390;sheet.adapt();assert.equal(h.dialogs().length,1);assert.ok(h.dialogs()[0].querySelectorAll('input').includes(input));assert.equal(input.value,'http://draft.test:9996');
  const modal=h.dialogs()[0],close=modal.querySelectorAll('button').find(node=>node.className.includes('dialog-close'));
- await close.click();assert.equal(modal.open,true,'缩窄前已有草稿仍需明确放弃');await close.click();assert.equal(sheet.dialog.open,false);assert.equal(h.context.settingsInline,null);
+ await close.click();assert.equal(modal.open,true,'缩窄前已有草稿仍需明确放弃');await close.click();assert.equal(modal.open,true);await find(modal, node => node.textContent === '放弃修改').click();assert.equal(sheet.dialog.open,false);assert.equal(h.context.settingsInline,null);
 });
 
 
@@ -187,9 +190,12 @@ test('缩窄不关闭正在编辑的原生子弹层，子弹层关闭后再移�
 });
 
 
-test('恢复的配置草稿在桌面立即离开时也必须先确认放弃',()=>{
+test('恢复的配置草稿在桌面立即离开时也必须先确认放弃',async()=>{
  const h=harness(async()=>config(),{desktop:true});h.context.acceptConsoleConfig(config());
  const sheet=h.context.openMediaMtxEditor('http://restored.test:9996');
- assert.equal(sheet.requestClose('view:tasks'),false);assert.equal(sheet.dialog.open,true);
- assert.equal(sheet.requestClose('view:tasks'),true);assert.equal(sheet.dialog.open,false);
+ let continued=0;
+ assert.equal(sheet.requestClose(() => continued++),false);assert.equal(sheet.dialog.open,true);
+ assert.equal(sheet.requestClose(() => continued++),false);assert.equal(sheet.dialog.open,true);
+ await find(sheet.dialog, node => node.textContent === '放弃修改').click();
+ assert.equal(continued,1);assert.equal(sheet.dialog.open,false);
 });

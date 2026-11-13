@@ -66,7 +66,7 @@ test('自动结果页签名绑定任务，查询格式不扩大访问范围，�
   const signed = signDownload(pathname, { token });
   assert.equal(verifyDownload(`${signed}&format=json`, { token }), true);
   assert.equal(verifyDownload(signed.replace('123456789abc', '123456789abd'), { token }), false);
-  assert.ok(mediaJobPage().includes('setTimeout(refresh,3000)'));
+  assert.ok(mediaJobPage().includes('<progress id="track" max="100"'));
   assert.ok(!mediaJobPage().includes('<img'));
 });
 

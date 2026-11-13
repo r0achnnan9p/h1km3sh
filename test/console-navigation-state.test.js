@@ -136,6 +136,20 @@ test('switching tabs starts at the page heading while reselecting the current ta
   assert.ok(h.loads.includes('settings')); assert.ok(h.loads.includes('library'));
 });
 
+test('browser Back preserves a modal draft and its current workspace', () => {
+  const h = navigationHarness();
+  h.document.body.dataset.view = 'settings';
+  h.context.activeDialog = { open: true };
+  h.context.dismissActiveDialog = () => false;
+  h.context.location.hash = '#library';
+  h.context.navigate('library', false);
+  assert.equal(h.document.body.dataset.view, 'settings');
+  assert.deepEqual(h.pushes, [[null, '', '#settings']]);
+  h.context.dismissActiveDialog = () => true;
+  h.context.navigate('library', false);
+  assert.equal(h.document.body.dataset.view, 'library');
+});
+
 test('history navigation and invalid routes also start the newly visible view at the top without adding history', () => {
   const h = navigationHarness();
   h.context.navigate('tasks', false); assert.equal(h.pushes.length, 0); assert.deepEqual(h.scrolls, [[0, 0]]);

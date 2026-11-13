@@ -7,6 +7,9 @@ class Element {
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this.children = nodes; }
   setAttribute(name, value) { this.attributes[name] = value; }
+  getAttribute(name) { return this.attributes[name]; }
+  focus() { this.focused = true; }
+  get days() { return this.children.flatMap(row => row.children.flatMap(cell => cell.children)); }
   addEventListener(type, handler) { this.listeners[type] = handler; }
   emit(type, event = {}) { this.listeners[type]?.(event); }
 }
@@ -32,8 +35,8 @@ test('numeric keypad date input accepts eight digits and emits canonical YYYY-MM
     input.value = '20261001'; input.emit('change');
     assert.deepEqual(selected, ['2026-10-01']); assert.equal(input.value, '2026-10-01'); assert.equal(error.textContent, '');
     assert.equal(month.textContent, '2026 年 10 月');
-    const day = grid.children.find(node => node.attributes['aria-label'] === '2026-10-01');
-    assert.equal(day.attributes['aria-pressed'], 'true');
+    const day = grid.days.find(node => node.attributes['aria-label'] === '2026-10-01');
+    assert.equal(grid.children.flatMap(row => row.children).find(cell => cell.children.includes(day)).attributes['aria-selected'], 'true');
   });
 });
 
@@ -62,11 +65,50 @@ test('invalid compact, incomplete and invalid hyphenated dates retain typed inpu
 
 test('calendar day buttons and today retain canonical selection; core calendar validation stays strict', () => {
   withCalendar(({ wrap, input, grid, selected }) => {
-    grid.children.find(node => node.attributes['aria-label'] === '2026-09-15').emit('click');
+    grid.days.find(node => node.attributes['aria-label'] === '2026-09-15').emit('click');
     assert.equal(input.value, '2026-09-15');
     wrap.children.at(-1).emit('click'); assert.equal(input.value, '2026-10-01');
     assert.deepEqual(selected, ['2026-09-15', '2026-10-01']);
   });
   assert.equal(isCalendarDate('20261001'), false);
   assert.equal(isCalendarDate('2026-10-01'), true);
+});
+
+test('calendar candidates stay unsubmitted, including Safari Enter delivered just after compositionend', () => {
+  withCalendar(({ input, selected }) => {
+    input.value = '20240229';
+    const enter = (timeStamp, extra) => input.emit('keydown', { key: 'Enter', timeStamp, preventDefault() {}, ...extra });
+    enter(500, { isComposing: true }); enter(510, { keyCode: 229 });
+    input.emit('compositionstart'); enter(515); input.emit('compositionend', { timeStamp: 520 });
+    enter(519); enter(522);
+    assert.deepEqual(selected, []);
+    enter(1000);
+    assert.deepEqual(selected, ['2024-02-29']);
+  });
+});
+
+test('calendar has one tab stop; arrows and Page keys cross months without committing a date', () => {
+  withCalendar(({ grid, selected, month, input }) => {
+    const current = () => {
+      const stops = grid.days.filter(day => day.tabIndex === 0);
+      assert.equal(stops.length, 1);
+      return stops[0];
+    };
+    function press(key, nextDate) {
+      grid.emit('keydown', { key, target: current(), preventDefault() {} });
+      assert.equal(current().getAttribute('aria-label'), nextDate);
+      assert.equal(current().focused, true);
+    }
+    assert.equal(grid.getAttribute('role'), 'grid');
+    assert.equal(current().getAttribute('aria-label'), '2026-09-30');
+    press('ArrowRight', '2026-10-01'); press('Home', '2026-09-28'); press('End', '2026-10-04');
+    press('ArrowUp', '2026-09-27'); press('ArrowDown', '2026-10-04');
+    assert.deepEqual(selected, []);
+    input.value = '20240131'; input.emit('change');
+    press('PageDown', '2024-02-29'); press('PageUp', '2024-01-29');
+    assert.equal(month.textContent, '2024 年 1 月');
+    assert.deepEqual(selected, ['2024-01-31']);
+    grid.emit('keydown', { key: 'ArrowDown', altKey: true, target: current(), preventDefault() { assert.fail(); } });
+    assert.equal(current().getAttribute('aria-label'), '2024-01-29');
+  });
 });

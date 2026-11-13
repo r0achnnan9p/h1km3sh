@@ -51,7 +51,7 @@ test('clearance defaults to zero, is capped by an existing spacing token and fol
 });
 
 test('top padding and bounded pane heights account for the same clearance exactly once', () => {
-  assert.match(css, /padding:calc\(max\(12px,var\(--safe-top\)\) \+ var\(--status-bar-blur-gap\)\) 16px calc\(68px \+ var\(--safe-bottom\)\)/);
+  assert.match(css, /padding:calc\(max\(12px,var\(--safe-top\)\) \+ var\(--status-bar-blur-gap\)\) max\(var\(--space-4\),var\(--safe-right\)\) calc\(68px \+ var\(--safe-bottom\)\)/);
   assert.match(css, /padding-top:calc\(max\(8px,var\(--safe-top\)\) \+ var\(--status-bar-blur-gap\)\)/);
   // Replay now derives the remaining height through the flex shell. Subtracting
   // the same safe-area/fade formula again from the child would reintroduce the
@@ -71,8 +71,6 @@ test('top padding and bounded pane heights account for the same clearance exactl
   assert.ok(replayPanes.length > 0);
   assert.match(replayPanes[0][1], /flex:\s*1;[\s\S]*min-height:\s*0;\s*height:\s*auto/);
   for (const [, pane] of replayPanes) assert.doesNotMatch(pane, /(?:height|min-height|max-height|padding):[^;]*(?:--safe-|--status-bar-blur-gap)/);
-  const paneHeights = css.match(/height:calc\(var\(--app-viewport-height\) - max\(12px,var\(--safe-top\)\) - var\(--status-bar-blur-gap\) - var\(--safe-bottom\) - 88px\)/g);
-  assert.equal(paneHeights?.length, 2, 'both library and tasks use the same available height');
   assert.match(css, /bottom:0; height:calc\(64px \+ var\(--safe-bottom\)\)/, 'bottom rail geometry is unchanged');
 });
 

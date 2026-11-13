@@ -30,7 +30,9 @@
 .choice-option[aria-pressed="true"] { background: var(--tint); border-color: var(--cyan); color: var(--accent); }
 .calendar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .calendar-heading button { min-width: 48px; font-size: 26px; }
-.calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; text-align: center; }
+.calendar-weekdays, .calendar-grid, .calendar-grid > [role="row"] { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; text-align: center; }
+.calendar-grid > [role="row"] { grid-column: 1 / -1; gap: inherit; }
+.calendar-grid .calendar-day { width: 100%; }
 .calendar-weekdays { color: var(--muted); font-size: 14px; }
 .calendar-day { min-width: 0; min-height: 48px; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--surface); font-size: 16px; }
 .calendar-day.today { border-color: var(--cyan); }

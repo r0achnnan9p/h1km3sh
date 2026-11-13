@@ -4,6 +4,12 @@ import { iconSvg } from './ui-primitives.js';
 export let activeDialog = null;
 const CLOSE_ICON = iconSvg('clear');
 let nextDialogId = 0;
+let requestActiveDismissal = null;
+
+// Route changes and platform close requests go through the same draft/pending guard.
+export function dismissActiveDialog(onDiscard) {
+  return !activeDialog?.open || requestActiveDismissal(onDiscard);
+}
 // Keep the document fixed while any native dialog is open, including replacements.
 const backgroundDialogs = new Set();
 let backgroundScroll = null;
@@ -26,6 +32,39 @@ function lockDialogBackground(dialog) {
 }
 const dateStart = date => new Date(`${date}T00:00:00+08:00`).getTime();
 function addButton(parent, label, className, action) { const button = document.createElement('button'); button.type = 'button'; button.className = className; button.textContent = label; button.addEventListener('click', action); parent.append(button); return button; }
+// The same explicit choice protects a native sheet and the desktop settings pane.
+export function createDiscardGuard(dialog, actions, error) {
+  let prompt = null;
+  function reset() {
+    if (!prompt) return;
+    prompt.remove(); prompt = null;
+    actions.hidden = false; error.textContent = '';
+    if (dialog.tagName === 'DIALOG') dialog.setAttribute('closedby', 'closerequest');
+  }
+  return {
+    reset,
+    get showing() { return Boolean(prompt); },
+    ask(onDiscard) {
+      if (prompt) return;
+      const editor = document.activeElement;
+      error.id ||= `discard-warning-${++nextDialogId}`;
+      error.textContent = '有未保存的修改。要放弃这些修改吗？';
+      prompt = document.createElement('div'); prompt.className = 'dialog-actions';
+      const keep = addButton(prompt, '继续编辑', 'quiet-button', () => {
+        reset();
+        if (dialog.contains(editor)) editor.focus({ preventScroll: true });
+        else dialog.querySelector('input:not(:disabled), button:not(:disabled)')?.focus({ preventScroll: true });
+      });
+      keep.setAttribute('aria-describedby', error.id);
+      addButton(prompt, '放弃修改', 'danger-button', () => {
+        reset(); onDiscard();
+      });
+      actions.hidden = true; dialog.append(prompt);
+      if (dialog.tagName === 'DIALOG') dialog.setAttribute('closedby', 'none');
+      keep.focus({ preventScroll: true });
+    },
+  };
+}
 export function openDialog(title, description = '', { trackChanges = true, initialDirty = false } = {}) {
   activeDialog?.close();
   const previous = document.activeElement;
@@ -42,25 +81,22 @@ export function openDialog(title, description = '', { trackChanges = true, initi
   const error = document.createElement('p'); error.className = 'dialog-error'; error.setAttribute('role', 'alert');
   const actions = document.createElement('div'); actions.className = 'dialog-actions';
   dialog.append(head, content, error, actions); document.body.append(dialog);
-  let pending = false, dirty = Boolean(initialDirty), discardRequested = false; const disabledBeforePending = new Map();
-  const close = (allowDiscard = true) => {
-    if (pending) return;
-    if (dirty && (!discardRequested || !allowDiscard)) {
-      discardRequested = true; error.textContent = '有未保存的修改，再次关闭将放弃修改。';
-      closeButton.textContent = '放弃'; closeButton.title = '放弃修改'; closeButton.setAttribute('aria-label', closeButton.title);
-      return;
-    }
-    dialog.close();
-  };
+  let pending = false, dirty = Boolean(initialDirty);
+  const disabledBeforePending = new Map();
+  const discard = createDiscardGuard(dialog, actions, error);
+  function requestDismissal(onDiscard) {
+    if (pending) return false;
+    if (!dirty) { dialog.close(); return true; }
+    discard.ask(() => {
+      if (pending) return;
+      dialog.close(); onDiscard?.();
+    });
+    return false;
+  }
   dialog.addEventListener('input', () => {
-    if (!trackChanges) return;
-    dirty = true;
-    if (discardRequested) {
-      discardRequested = false; error.textContent = '';
-      closeButton.innerHTML = CLOSE_ICON; closeButton.title = '关闭'; closeButton.setAttribute('aria-label', closeButton.title);
-    }
+    if (trackChanges) { dirty = true; discard.reset(); }
   });
-  closeButton.addEventListener('click', () => close());
+  closeButton.addEventListener('click', () => requestDismissal());
   // Only a deliberate pull on the title area dismisses a phone sheet. Scrolling
   // the form never dismisses it, and repeated pulls never discard a draft.
   let pull = null;
@@ -73,23 +109,45 @@ export function openDialog(title, description = '', { trackChanges = true, initi
     if (pull?.id !== event.pointerId) return;
     const vertical = event.clientY - pull.y, horizontal = Math.abs(event.clientX - pull.x);
     pull = null;
-    if (vertical >= 64 && vertical > horizontal * 2) close(false);
+    if (vertical >= 64 && vertical > horizontal * 2) requestDismissal();
   });
   head.addEventListener('lostpointercapture', () => { pull = null; });
-  dialog.addEventListener('cancel', event => { if (event.target !== dialog) return; event.preventDefault(); close(); });
+  dialog.addEventListener('cancel', event => { if (event.target !== dialog) return; event.preventDefault(); requestDismissal(); });
   const releaseBackground = lockDialogBackground(dialog);
   const detachViewport = fitDialogViewport(dialog);
   dialog.addEventListener('close', () => {
     detachViewport(); dialog.remove(); releaseBackground();
     if (activeDialog !== dialog) return;
     activeDialog = null;
+    requestActiveDismissal = null;
     if (previous?.isConnected) previous.focus({ preventScroll: true });
     else document.querySelector('[data-view][aria-current="page"]')?.focus({ preventScroll: true });
   });
   activeDialog = dialog;
+  requestActiveDismissal = requestDismissal;
   try { dialog.showModal(); heading.focus({ preventScroll: true }); }
-  catch (error) { detachViewport(); dialog.remove(); releaseBackground(); if (activeDialog === dialog) activeDialog = null; throw error; }
-  return { dialog, content, error, actions, close: () => dialog.close(), setPending(value) { pending = value; dialog.setAttribute('aria-busy', String(value)); dialog.querySelectorAll('button, input').forEach(node => { if (value) { if (!disabledBeforePending.has(node)) disabledBeforePending.set(node, node.disabled); node.disabled = true; } else { node.disabled = disabledBeforePending.get(node) ?? node.disabled; } }); if (!value) disabledBeforePending.clear(); } };
+  catch (error) {
+    detachViewport(); dialog.remove(); releaseBackground();
+    if (activeDialog === dialog) { activeDialog = null; requestActiveDismissal = null; }
+    throw error;
+  }
+  return {
+    dialog, content, error, actions, close: () => dialog.close(), requestClose: requestDismissal,
+    setPending(value) {
+      pending = value;
+      dialog.setAttribute('aria-busy', String(value));
+      dialog.setAttribute('closedby', pending || discard.showing ? 'none' : 'closerequest');
+      for (const node of dialog.querySelectorAll('button, input, select, textarea')) {
+        if (pending) {
+          if (!disabledBeforePending.has(node)) disabledBeforePending.set(node, node.disabled);
+          node.disabled = true;
+        } else if (disabledBeforePending.has(node)) {
+          node.disabled = disabledBeforePending.get(node);
+        }
+      }
+      if (!pending) disabledBeforePending.clear();
+    },
+  };
 }
 // iOS Safari keeps layout viewport height when its keyboard opens. Anchor sheets
 // to the *visual* viewport instead, and keep focus handling in the original tap.
@@ -137,10 +195,10 @@ export function fitDialogViewport(dialog) {
 export function bindEnterConfirm(input, confirm, { now = Date.now, grace = 120 } = {}) {
   let composing = false, compositionEndedAt = -Infinity;
   const start = () => { composing = true; };
-  const end = () => { composing = false; compositionEndedAt = now(); };
+  const end = event => { composing = false; compositionEndedAt = event?.timeStamp ?? now(); };
   const keydown = event => {
     if (event.key !== 'Enter') return;
-    if (event.isComposing || event.keyCode === 229 || composing || now() - compositionEndedAt < grace) return;
+    if (event.isComposing || event.keyCode === 229 || composing || Math.abs((event.timeStamp ?? now()) - compositionEndedAt) < grace) return;
     event.preventDefault();
     confirm(event);
   };
@@ -234,40 +292,93 @@ export function mountCalendar(parent, { value, today, onSelect }) {
   input.inputMode = 'numeric';
   input.setAttribute('aria-description', '可直接输入八位数字，例如 20260930，也支持 2026-09-30。');
   const error = document.createElement('p'); error.className = 'dialog-error'; error.setAttribute('role', 'alert');
-  let month = new Date(`${value}T12:00:00Z`); if (!Number.isFinite(month.getTime())) month = new Date();
-  month.setUTCDate(1);
+  let cursor = new Date(`${isCalendarDate(value) ? value : today()}T12:00:00Z`);
+  const dayButtons = new Map();
+  function moveMonth(delta) {
+    const lastDay = new Date(cursor);
+    lastDay.setUTCMonth(lastDay.getUTCMonth() + delta + 1, 0);
+    cursor.setUTCMonth(cursor.getUTCMonth() + delta, Math.min(cursor.getUTCDate(), lastDay.getUTCDate()));
+  }
   const bar = document.createElement('div'); bar.className = 'calendar-heading';
-  const prev = addButton(bar, '‹', 'quiet-button', () => { month.setUTCMonth(month.getUTCMonth() - 1); draw(); }); prev.setAttribute('aria-label', '上个月');
-  const label = document.createElement('strong'); bar.append(label);
-  const next = addButton(bar, '›', 'quiet-button', () => { month.setUTCMonth(month.getUTCMonth() + 1); draw(); }); next.setAttribute('aria-label', '下个月');
+  const prev = addButton(bar, '‹', 'quiet-button', () => { moveMonth(-1); draw(); }); prev.setAttribute('aria-label', '上个月');
+  const label = document.createElement('strong'); label.setAttribute('aria-live', 'polite'); bar.append(label);
+  const next = addButton(bar, '›', 'quiet-button', () => { moveMonth(1); draw(); }); next.setAttribute('aria-label', '下个月');
   const weekdays = document.createElement('div'); weekdays.className = 'calendar-weekdays'; weekdays.setAttribute('aria-hidden', 'true');
   for (const name of ['一', '二', '三', '四', '五', '六', '日']) { const cell = document.createElement('span'); cell.textContent = name; weekdays.append(cell); }
-  const grid = document.createElement('div'); grid.className = 'calendar-grid';
+  const grid = document.createElement('div'); grid.className = 'calendar-grid'; grid.setAttribute('role', 'grid');
   wrap.append(bar, weekdays, grid, error);
-  const choose = value => {
-    value = value.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
-    if (!isCalendarDate(value)) { error.textContent = '请输入有效日期，例如 20260930 或 2026-09-30。'; return; }
-    error.textContent = ''; input.value = value; month = new Date(`${value.slice(0, 7)}-01T12:00:00Z`); draw(); onSelect(value);
-  };
+
+  function choose(date) {
+    date = date.replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+    if (!isCalendarDate(date)) { error.textContent = '请输入有效日期，例如 20260930 或 2026-09-30。'; return; }
+    error.textContent = ''; input.value = date; cursor = new Date(`${date}T12:00:00Z`);
+    draw(); onSelect(date);
+  }
   function draw() {
-    label.textContent = `${month.getUTCFullYear()} 年 ${month.getUTCMonth() + 1} 月`; grid.replaceChildren();
-    const start = (month.getUTCDay() + 6) % 7, total = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
-    for (let i = 0; i < start; i++) grid.append(document.createElement('span'));
-    for (let day = 1; day <= total; day++) {
-      const value = `${month.getUTCFullYear()}-${String(month.getUTCMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const button = addButton(grid, String(day), `calendar-day${value === input.value ? ' selected' : ''}${value === today() ? ' today' : ''}`, () => choose(value));
-      button.setAttribute('aria-label', value); button.setAttribute('aria-pressed', String(value === input.value));
+    const month = new Date(cursor); month.setUTCDate(1);
+    const monthKey = month.toISOString().slice(0, 7);
+    label.textContent = `${month.getUTCFullYear()} 年 ${month.getUTCMonth() + 1} 月`;
+    prev.disabled = monthKey === '0000-01'; next.disabled = monthKey === '9999-12';
+    grid.setAttribute('aria-label', label.textContent);
+    grid.setAttribute('aria-colcount', '7');
+    grid.replaceChildren(); dayButtons.clear();
+    const firstColumn = (month.getUTCDay() + 6) % 7;
+    month.setUTCMonth(month.getUTCMonth() + 1, 0);
+    const todayValue = today();
+    let row;
+    for (let index = 0; index < firstColumn + month.getUTCDate(); index++) {
+      if (index % 7 === 0) {
+        row = document.createElement('div'); row.setAttribute('role', 'row'); grid.append(row);
+      }
+      const cell = document.createElement('div'); cell.setAttribute('role', 'gridcell'); row.append(cell);
+      const day = index - firstColumn + 1;
+      if (day < 1) continue;
+      const date = `${monthKey}-${String(day).padStart(2, '0')}`;
+      const selected = date === input.value;
+      const button = addButton(cell, String(day), `calendar-day${selected ? ' selected' : ''}${date === todayValue ? ' today' : ''}`, () => choose(date));
+      cell.setAttribute('aria-selected', String(selected));
+      button.setAttribute('aria-label', date);
+      if (date === todayValue) button.setAttribute('aria-current', 'date');
+      button.tabIndex = day === cursor.getUTCDate() ? 0 : -1;
+      dayButtons.set(date, button);
     }
   }
   addButton(wrap, '今天', 'quiet-button', () => choose(today()));
   input.addEventListener('change', () => choose(input.value));
-  input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); choose(input.value); } });
-  grid.addEventListener('keydown', event => { const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[event.key]; if (!delta) return; const days = [...grid.querySelectorAll('button')], index = days.indexOf(event.target); if (index < 0) return; event.preventDefault(); days[Math.max(0, Math.min(days.length - 1, index + delta))].focus(); });
+  bindEnterConfirm(input, () => choose(input.value));
+  grid.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+    const date = event.target.getAttribute('aria-label');
+    if (event.target !== dayButtons.get(date)) return;
+    const weekday = (cursor.getUTCDay() + 6) % 7;
+    const days = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7, Home: -weekday, End: 6 - weekday };
+    if (event.key === 'PageUp' || event.key === 'PageDown') moveMonth(event.key === 'PageUp' ? -1 : 1);
+    else if (Object.hasOwn(days, event.key)) cursor.setUTCDate(cursor.getUTCDate() + days[event.key]);
+    else return;
+    // The date input accepts exactly four-digit years.
+    const target = cursor.toISOString().slice(0, 10);
+    if (!isCalendarDate(target)) { cursor = new Date(`${date}T12:00:00Z`); return; }
+    event.preventDefault();
+    if (!dayButtons.has(target)) draw();
+    else { event.target.tabIndex = -1; dayButtons.get(target).tabIndex = 0; }
+    dayButtons.get(target).focus();
+  });
+  grid.addEventListener('focusin', event => {
+    const date = event.target.getAttribute('aria-label');
+    if (event.target !== dayButtons.get(date)) return;
+    const previous = dayButtons.get(cursor.toISOString().slice(0, 10));
+    if (previous) previous.tabIndex = -1;
+    cursor = new Date(`${date}T12:00:00Z`); event.target.tabIndex = 0;
+  });
   draw(); return wrap;
 }
 export function openCalendar({ value, today, onSelect, description = '点按日期立即选择，也可以直接输入。' }) {
   const sheet = openDialog('选择日期', description);
-  mountCalendar(sheet.content, { value, today, onSelect: value => { sheet.close(); onSelect(value); } });
+  mountCalendar(sheet.content, { value, today, onSelect: date => {
+    // Closing the focused text field can synchronously dispatch change after Enter.
+    if (!sheet.dialog.open) return;
+    sheet.close(); onSelect(date);
+  } });
 }
 
 export function enhanceDateInput(input, { today, description } = {}) {

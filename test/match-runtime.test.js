@@ -92,7 +92,7 @@ test('真实 HTTP：双镜头全部交付、固定私密投稿草稿、自动结
     const taskId = result.structuredContent.taskId;
     const json = await api(`/media-jobs/${taskId}?format=json`);
     assert.equal(json.body.files.length, 2);
-    assert.ok((await (await fetch(base + `/media-jobs/${taskId}`)).text()).includes('setTimeout(refresh,3000)'));
+    assert.ok((await (await fetch(base + `/media-jobs/${taskId}`)).text()).includes('<progress id="track" max="100"'));
     const draftInput = { filename: result.structuredContent.files[0].filename, title: '天行者 队内', tid: 171, tags: ['错误'], onlySelf: false };
     const workerDir = path.join(root, 'downloads', 'biliup_work');
     const workerFile = path.join(workerDir, 'worker-status.json');
