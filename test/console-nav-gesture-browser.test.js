@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createConsoleFixture } from '../scripts/console-fixture.js';
+import { mediaJobPage } from '../lib/media-job-page.js';
 import express from 'express';
 
 const candidates = [process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
@@ -776,6 +777,15 @@ test('iOS cold-start regression: short dynamic/fixed viewport still fills the la
   await b.send('Page.navigate', { url:`http://127.0.0.1:${server.address().port}/?fixture=normal#replay` });
   for(let i=0;i<100 && !await b.evaluate(`document.body?.dataset.view==='replay' && !document.getElementById('console-shell').hidden`);i++) await sleep(100);
   assert.equal(await b.evaluate(`document.body?.dataset.view`), 'replay');
+  const themeBackground = await b.evaluate(`(() => {
+    const sample = document.createElement('span');
+    sample.style.backgroundColor = 'var(--bg)';
+    document.body.append(sample);
+    const color = getComputedStyle(sample).backgroundColor;
+    sample.remove();
+    return color;
+  })()`);
+  assert.notEqual(themeBackground, 'rgba(0, 0, 0, 0)', 'the theme must provide an opaque workspace background');
   const geometry = () => b.evaluate(`(() => {
     const rect = selector => {const r=document.querySelector(selector).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom};};
     const strip=document.querySelector('.status-bar-background'), style=getComputedStyle(strip);
@@ -805,7 +815,7 @@ test('iOS cold-start regression: short dynamic/fixed viewport still fills the la
     assert.equal(g.shell.y,0); assert.equal(g.nav.bottom,932); assert.equal(g.nav.height,98);
     assert.equal(g.scrollY,0);
     assert.deepEqual(g.strip,{x:0,y:0,width:430,height:59,bottom:59});
-    assert.deepEqual(g.stripStyle,{position:'fixed',background:'rgb(7, 13, 20)',pointerEvents:'none',filter:'none'});
+    assert.deepEqual(g.stripStyle,{position:'fixed',background:themeBackground,pointerEvents:'none',filter:'none'});
     for(const button of g.buttons) {
       assert.ok(button.width>=44 && button.height>=44 && button.bottom<=898 && button.hit,'full button target above the one 34px safety inset');
     }
@@ -861,11 +871,47 @@ test('status-fade clearance moves four headings but never moves the shell or bot
       assert.equal(after.padding-before.padding,20);
       assert.deepEqual(after.shell,before.shell); assert.deepEqual(after.nav,before.nav);
       assert.equal(after.nav.bottom,height); assert.equal(after.nav.height,98);
-      if(view==='library'||view==='tasks') assert.equal(after.pane.bottom,before.pane.bottom,'bounded list bottom stays fixed');
+      if (view === 'library' || view === 'tasks') {
+        assert.equal(after.pane.bottom, before.pane.bottom, 'bounded list bottom stays fixed');
+        const withBanner = await b.evaluate(`(() => {
+          const banner = document.getElementById('connection-banner');
+          banner.hidden = false;
+          const scroller = document.querySelector('#view-library.active .library-scroll, #view-tasks.active .task-scroll:not([hidden])');
+          const workspace = document.querySelector('.workspace-main');
+          const result = {
+            bottom: scroller.getBoundingClientRect().bottom,
+            height: scroller.clientHeight,
+            outerOverflow: workspace.scrollHeight - workspace.clientHeight
+          };
+          banner.hidden = true;
+          return result;
+        })()`);
+        assert.ok(withBanner.height > 0, 'the list keeps a scrollable area');
+        assert.ok(withBanner.bottom <= after.nav.y, 'the offline notice must not push any list under the navigation');
+        assert.equal(withBanner.outerOverflow, 0, 'only the list should scroll');
+      }
       assert.equal(after.scrollY,0);assert.equal(after.overflow,false);
       evidence.push({width,height,view,headingY:after.heading.y,navBottom:after.nav.bottom,paneBottom:after.pane.bottom});
     }
   }
+  // A very short viewport cannot fit the tools, reconnect notice and a whole
+  // list at once. The outer workspace must scroll the list above the fixed tabs.
+  await b.send('Emulation.setDeviceMetricsOverride', {width:568,height:240,deviceScaleFactor:1,mobile:true});
+  for (const view of ['library', 'tasks']) {
+    const result = await b.evaluate(`(() => {
+      document.documentElement.style.setProperty('--safe-top', '0px');
+      document.querySelector('.mobile-nav button[data-view="${view}"]').click();
+      document.getElementById('connection-banner').hidden = false;
+      const workspace = document.querySelector('.workspace-main');
+      workspace.scrollTop = workspace.scrollHeight;
+      const scroller = document.querySelector('#view-library.active .library-scroll, #view-tasks.active .task-scroll:not([hidden])');
+      const rect = scroller.getBoundingClientRect();
+      return {height: rect.height, bottom: rect.bottom, navTop: document.querySelector('.mobile-nav').getBoundingClientRect().top};
+    })()`);
+    assert.ok(result.height >= 44, 'list keeps at least one touch target visible');
+    assert.ok(result.bottom <= result.navTop + 1, 'the entire list scrollport is reachable');
+  }
+  await b.evaluate(`document.getElementById('connection-banner').hidden = true`);
   await b.send('Emulation.setDeviceMetricsOverride',{width:932,height:430,deviceScaleFactor:1,mobile:true});
   await b.evaluate(`document.documentElement.style.setProperty('--safe-top','0px');document.documentElement.style.setProperty('--safe-bottom','21px');document.querySelector('.mobile-nav button[data-view="library"]').click();window.dispatchEvent(new Event('resize'))`); await sleep(100);
   const landscape=await geometry();
@@ -876,4 +922,62 @@ test('status-fade clearance moves four headings but never moves the shell or bot
   await b.evaluate(`delete navigator.userAgent;Object.defineProperty(navigator,'standalone',{configurable:true,value:false});window.dispatchEvent(new Event('resize'))`);await sleep(100);
   assert.equal(await b.evaluate(`document.documentElement.classList.contains('standalone-status-fade')`),false);
   t.diagnostic(JSON.stringify({engine:'Chromium; system blur still needs real iOS acceptance',evidence}));
+});
+
+
+test('signed results pause in the background and retain the focused file when its signature rotates', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const resources = createResources();
+  t.after(() => resources.closeAll());
+  const app = express();
+  let requests = 0;
+  app.get('/result', (req, res) => {
+    if (req.query.format !== 'json') return res.type('html').send(mediaJobPage());
+    assert.equal(req.query.signature, 'test');
+    requests++;
+    if (requests === 1) return res.sendStatus(503);
+    res.json({
+      status: requests === 3 ? 'completed' : 'converting',
+      files: [{ filename: '镜头.mp4', artifactUrl: '/artifact.mp4?signature=' + requests }],
+    });
+  });
+  const server = await new Promise((resolve, reject) => {
+    const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
+    instance.once('error', reject);
+  });
+  resources.add('result server', () => new Promise(resolve => {
+    server.close(resolve);
+    server.closeAllConnections();
+  }));
+  const browser = await launch(resources);
+  await browser.send('Page.enable');
+  await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: `
+    window.testHidden = false;
+    Object.defineProperty(document, 'hidden', { get: () => window.testHidden });
+    window.setHidden = hidden => {
+      window.testHidden = hidden;
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+  ` });
+  await browser.send('Page.navigate', { url: 'http://127.0.0.1:' + server.address().port + '/result?signature=test' });
+  async function waitForState(expected) {
+    for (let i = 0; i < 100; i++) {
+      if (await browser.evaluate("document.querySelector('#state')?.textContent") === expected) return;
+      await sleep(100);
+    }
+    assert.fail('result page did not reach ' + expected);
+  }
+
+  await waitForState('暂时无法更新');
+  await browser.evaluate('setHidden(true)');
+  await sleep(5100);
+  assert.equal(requests, 1, 'retry timer must stop while hidden');
+  await browser.evaluate('setHidden(false)');
+  await waitForState('正在封装');
+  await browser.evaluate("window.fileLink = document.querySelector('.file-link'); fileLink.focus()");
+  await waitForState('已完成');
+  assert.equal(await browser.evaluate("document.activeElement === fileLink && fileLink.href.endsWith('signature=3')"), true);
+  assert.equal(await browser.evaluate("document.querySelector('#track').value"), 100);
+  await browser.evaluate('setHidden(true);setHidden(false)');
+  await sleep(100);
+  assert.equal(requests, 3, 'terminal results must not restart polling');
 });

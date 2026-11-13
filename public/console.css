@@ -187,7 +187,7 @@ h3 { font-size: 14px; font-weight: 600; }
 .library-search > svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 19px; height: 19px; fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; pointer-events: none; }
 .library-tools .library-search input { min-height: 44px; padding-left: 40px; font-size: 16px; }
 .library-summary { display: flex; justify-content: space-between; gap: 15px; padding: 18px 0; color: var(--muted); font-size: 12px; }
-.output-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.output-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); align-items: start; gap: 18px; }
 .output-card { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .output-preview { margin: 0 0 13px; min-width: 0; }
 .output-preview-surface { position: relative; overflow: hidden; border-radius: var(--radius-tile); background: var(--bg); }
@@ -230,11 +230,10 @@ h3 { font-size: 14px; font-weight: 600; }
 .task-state.done { color: var(--green); }
 .task-state.failed { color: var(--coral); }
 .task-detail { margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; white-space: pre-line; }
-.progress-track { height: 5px; margin-top: 16px; overflow: hidden; border-radius: var(--radius-tile); background: var(--surface2); }
-.progress-fill { height: 100%; min-width: 0; border-radius: inherit; background: var(--green); transition: width .3s; }
-.progress-track.indeterminate .progress-fill { width: 35%; animation: progress-slide 1.8s ease-in-out infinite; }
-.progress-track.waiting .progress-fill { width: 0; }
-@keyframes progress-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(390%); } }
+.progress-track { display: block; width: 100%; margin-top: 16px; accent-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .progress-track:indeterminate { opacity: 0; }
+}
 .task-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 10px; }
 .task-footer > span:first-child { overflow-wrap: anywhere; }
 .task-footer > button { margin-left: auto; }
@@ -248,6 +247,8 @@ h3 { font-size: 14px; font-weight: 600; }
 .settings-group { display: grid; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
 .settings-group > * + * { border-top: 1px solid rgba(255,255,255,.10); }
 .settings-item { display: grid; grid-template-columns: 36px minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: auto; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 14px 16px; border: 0; border-radius: 0; background: transparent; color: var(--text); font-size: 16px; font-weight: 600; text-align: left; }
+/* Row focus rings must stay inside the clipped, rounded group. */
+button.settings-item:focus-visible { outline-offset: -3px; }
 button.settings-item:hover:not(:disabled) { background: rgba(255,255,255,.06); }
 .settings-item-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-tile); background: rgba(255,255,255,.12); color: var(--accent); }
 .settings-item-icon svg, .settings-item-status svg, .settings-item-chevron svg, .settings-item-action svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -376,7 +377,6 @@ button.settings-item:hover:not(:disabled) { background: rgba(255,255,255,.06); }
   .views { padding: calc(25px + var(--safe-top)) 24px 0; }
   .replay-workspace { grid-template-columns: minmax(0, 1fr) 232px; gap: 16px; }
   .selection-panel { padding: 16px; }
-  .output-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .player-toggle { padding-inline: 7px; }
   .transport-buttons .quiet-button { padding-inline: 6px; }
 }
@@ -452,7 +452,6 @@ button.settings-item:hover:not(:disabled) { background: rgba(255,255,255,.06); }
 }
 @media (max-width: 600px) {
   input, select { font-size: 16px; }
-  .output-grid { grid-template-columns: minmax(0, 1fr); }
   .output-card { padding: 12px; }
   .output-name { font-size: 14px; }
   .output-meta { font-size: 11px; }
@@ -771,7 +770,6 @@ body { background: var(--app-background); background-attachment: fixed; }
 /* Part 4: clear selected navigation, contained task scrolling and transfer evidence. */
 .nav-item.active, .mobile-nav button.active { background:var(--tint); color:var(--accent); box-shadow: var(--glass-shadow); }
 .mobile-nav button.active:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
-#view-tasks.active { display:flex; flex-direction:column; height:calc(var(--app-viewport-height) - var(--safe-top) - var(--safe-bottom) - 140px); min-height:240px; }
 #view-tasks .page-heading { flex:none; margin-bottom:12px; }
 .task-tabs { display:flex; flex:none; gap:4px; padding:4px; border-radius: var(--radius-card); }
 .task-tabs button { display:flex; align-items:center; justify-content:center; flex:1; min-height:48px; gap:8px; border:0; border-radius: var(--radius-button); background:transparent; color:var(--muted); }
@@ -785,8 +783,6 @@ body { background: var(--app-background); background-attachment: fixed; }
 .task-date-heading { padding:12px 8px 0; color:var(--muted); font:12px var(--mono); }
 .task-card { min-width:0; overflow-wrap:anywhere; background:var(--glass-light); border-color:var(--glass-edge); border-radius: var(--radius-card); }
 .task-card.task-verification { border-color:var(--warning); background:var(--warning-tint); }
-.task-working .progress-track { height:6px; }
-.task-working .progress-fill { background:linear-gradient(90deg,var(--accent),var(--accent)); box-shadow: none; }
 .task-transfer-stats { display:flex; align-items:center; justify-content:space-between; margin-top:10px; gap:8px; font-size:12px; }
 .task-percent { font-size:22px; font-weight:500; }
 .task-rate-line { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; font-size:12px; }
@@ -943,9 +939,43 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
   .mobile-nav.sliding-nav::before { transition: none; }
 }
 
-/* 成片与任务共用分页，滚动属于列表，不拖动页面背景。 */
-.library-scroll { min-height: 0; max-height: calc(var(--app-viewport-height) - 250px); overflow-y: auto; overscroll-behavior-y: contain; }
-.output-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+/* The shell reserves space for navigation. Wrapping notices, headings and tools
+   take their natural height before the remaining space goes to the lists. */
+body:is([data-view="library"], [data-view="tasks"]) .workspace-main {
+  height: var(--app-viewport-height);
+  overflow-y: auto;
+}
+body:is([data-view="library"], [data-view="tasks"]) .views {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+#view-library.active, #view-tasks.active {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.connection-banner, #view-library > :not(.library-scroll) { flex: none; }
+.library-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+/* On very short displays, allow the controls to scroll away before they can
+   squeeze the results to zero. Keeping these scroll roots preserves paging. */
+@media (max-height: 380px) {
+  body:is([data-view="library"], [data-view="tasks"]) .views { height: auto; min-height: 100%; }
+  #view-library.active, #view-tasks.active { flex: none; }
+  .library-scroll, .task-panels {
+    flex: none;
+    height: max(calc(2 * var(--control)), calc(var(--app-viewport-height) / 3));
+  }
+}
+@media (min-width: 1024px) {
+  .library-scroll, .task-scroll { scrollbar-gutter: stable; }
+}
 
 .output-copy { min-width: 0; flex: 1; }
 .output-name { display: block; padding: 0; border: 0; background: transparent; text-align: left; color: var(--text); min-height: 44px; width: 100%; }
@@ -960,11 +990,11 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 @media (max-width: 1023px) {
   .library-tools .library-search input, .library-tools #output-sort { min-height: 52px; }
   .output-grid { display: block; overflow: hidden; border: 1px solid var(--glass-edge); border-radius: var(--radius-panel); background: var(--glass-light); }
-  .output-card { display: grid; grid-template-columns: 112px minmax(0, 1fr) 44px; align-items: center; gap: 8px; min-height: 88px; padding: 12px 8px; border: 0; border-bottom: 1px solid rgba(255,255,255,.10); border-radius: 0; background: transparent; }
+  .output-card { display: grid; grid-template-columns: clamp(80px, 28%, 112px) minmax(0, 1fr) var(--control); align-items: center; gap: 8px; min-height: 88px; padding: 12px 8px; border: 0; border-bottom: 1px solid rgba(255,255,255,.10); border-radius: 0; background: transparent; }
   .output-card:last-child { border-bottom: 0; }
-  .output-card > .output-preview { width: 112px; margin: 0; }
+  .output-card > .output-preview { margin: 0; }
   .output-card .output-preview-surface { border-radius: var(--radius-tile); }
-  .output-card .output-poster { min-height: 63px; height: 63px; padding: 0; border-radius: var(--radius-tile); }
+  .output-card .output-poster { min-height: var(--control); padding: 0; border-radius: var(--radius-tile); }
   .output-card .output-poster-icon { width: 28px; height: 28px; font-size: 12px; }
   .output-card .output-top { display: block; overflow: hidden; }
   .output-card .output-name { min-height: 44px; font-size: 15px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: normal; }
@@ -999,13 +1029,10 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
   .side-nav .nav-task-count { position: static; margin-left: auto; }
   .workspace-main { margin-left: var(--sidebar); }
   .workspace-brand { margin-bottom: var(--space-6); }
-  #view-tasks.active { height: calc(var(--app-viewport-height) - 48px); }
   .task-tabs { display: none; }
   .task-panels { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
   .desktop-task-title { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-3); color: var(--muted); font-size: 15px; font-weight: 600; }
   .desktop-task-title svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-  .library-scroll { max-height: calc(var(--app-viewport-height) - 180px); }
-  .output-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%,300px),1fr)); align-items: start; }
   .output-card { display: flex; flex-direction: column; padding: var(--space-3); border-radius: var(--radius-card); background: var(--surface); }
   .output-name { font-size: 15px; }
   .output-meta { font: 12px/1.6 var(--mono); }
@@ -1067,16 +1094,6 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 /* The precision layer is a passive ruler; its old trim handles are not controls. */
 .precision-layout .precision-track-host .boundary-handle{display:none}
 
-/* Observed post-deploy: keep desktop list scrolling inside the list, not twice. */
-@media(min-width:1024px){
-  body:is([data-view="library"],[data-view="tasks"]) .workspace-main{height:var(--app-viewport-height);overflow:hidden}
-  body:is([data-view="library"],[data-view="tasks"]) .views{height:100%;display:flex;flex-direction:column;min-height:0}
-  body:is([data-view="library"],[data-view="tasks"]) .app-header,
-  body:is([data-view="library"],[data-view="tasks"]) .connection-banner{flex:none}
-  #view-library.active,#view-tasks.active{display:flex;flex-direction:column;flex:1;height:auto;min-height:0}
-  #view-library .page-heading,#view-library .library-tools,#view-library .library-summary,#view-library .page-maintenance{flex:none}
-  #view-library .library-scroll{flex:1;min-height:0;max-height:none}
-}
 /* Precision 原型收口：显示层共用现有状态、Token 和控件节点。 */
 .precision-layout .timeline-time-editor { display:inline-flex; align-items:center; min-height:44px; padding:0; border:0; background:transparent; color:var(--text); text-align:left; }
 .precision-layout .timeline-header { justify-content:flex-start; }
@@ -1105,7 +1122,7 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 .precision-layout #edit-range { display:inline-flex; }
 .precision-layout #view-replay .video-control { border-radius:var(--radius-pill); background:var(--fill-well); }
 @media (max-width:1023px) and (min-height:541px), (max-width:567px) {
-  .precision-layout .views { padding:calc(max(12px,var(--safe-top)) + var(--status-bar-blur-gap)) 16px calc(68px + var(--safe-bottom)); }
+  .precision-layout .views { padding:calc(max(12px,var(--safe-top)) + var(--status-bar-blur-gap)) max(var(--space-4),var(--safe-right)) calc(68px + var(--safe-bottom)) max(var(--space-4),var(--safe-left)); }
   .precision-layout .app-header { margin-bottom:8px; }
   .precision-layout .mobile-nav { height:64px; bottom:calc(10px + var(--safe-bottom)); }
 }
@@ -1139,14 +1156,13 @@ html.dialog-scroll-locked body { position: fixed; inset-inline: 0; top: var(--di
 .precision-layout .output-detail .output-poster { min-height:0; aspect-ratio:16/9; }
 @media (max-width:1023px) {
   .precision-layout .task-scroll { scrollbar-width:thin; }
+  .precision-layout:is([data-view="library"], [data-view="tasks"]) .views {
+    padding-bottom: calc(68px + var(--safe-bottom));
+  }
   .precision-layout .library-tools { margin-top:0; }
   .precision-layout .library-summary { padding:12px 0; }
 }
 @media (max-width:1023px) {
-  .precision-layout #view-tasks.active { height:calc(var(--app-viewport-height) - max(12px,var(--safe-top)) - var(--status-bar-blur-gap) - var(--safe-bottom) - 88px); min-height:0; }
-  .precision-layout #view-library.active { display:flex; flex-direction:column; height:calc(var(--app-viewport-height) - max(12px,var(--safe-top)) - var(--status-bar-blur-gap) - var(--safe-bottom) - 88px); min-height:0; }
-  .precision-layout #view-library .library-scroll { flex:1; min-height:0; max-height:none; }
-  .precision-layout #view-library > :not(.library-scroll) { flex:none; }
   .precision-layout .settings-group-label { margin-top:16px; margin-bottom:6px; }
 }
 .precision-layout .page-heading { flex-direction:row; align-items:center; justify-content:space-between; gap:12px; min-height:44px; }

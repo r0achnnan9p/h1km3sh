@@ -24,7 +24,7 @@ function harness() {
   const elements = new Map(); const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const state = { cameras: [], dvrs: [], selectedCamera: '', selectedChannel: '', dvrChannels: {}, playbackSource: 'mediamtx', segmentRequestId: 0, dvrChannelRequestId: 0, segments: [{ startMs: 0, endMs: 3000 }], inMs: 1000, outMs: 2000, busy: false };
   const requests = [], loads = [], liveStarts = [], loadOptions = [];
-  const context = vm.createContext({ setButtonIcon, setTimeout() {}, clearTimeout() {}, state, $, document: { body: { dataset: { view: 'replay' } }, createElement: () => new Element() }, AbortController, consoleSession: 1, exportSubmission: null, listCoverageGaps, rememberSubmittedTask() {}, today: () => '2026-09-30', notify() {}, setPlaybackNotice() {}, startLive() { liveStarts.push(state.selectedCamera); }, startDvrLive() {}, clearReplay() {}, renderTimeline() {}, updateSelection() { $('export-range').disabled = state.busy; }, loadSegments: async options => { loads.push(state.playbackSource); loadOptions.push(options); }, body: JSON.stringify, wallTime: ms => String(ms), navigate() {}, refreshState: async () => {}, taskProgressPresentation, taskStageLabel, taskProgressCaption, uploadProgressCaption, Date, URLSearchParams,
+  const context = vm.createContext({ setButtonIcon, setTimeout() {}, clearTimeout() {}, state, $, document: { body: { dataset: { view: 'replay' } }, createElement: tag => Object.assign(new Element(), { tagName: tag.toUpperCase() }) }, AbortController, consoleSession: 1, exportSubmission: null, listCoverageGaps, rememberSubmittedTask() {}, today: () => '2026-09-30', notify() {}, setPlaybackNotice() {}, startLive() { liveStarts.push(state.selectedCamera); }, startDvrLive() {}, clearReplay() {}, renderTimeline() {}, updateSelection() { $('export-range').disabled = state.busy; }, loadSegments: async options => { loads.push(state.playbackSource); loadOptions.push(options); }, body: JSON.stringify, wallTime: ms => String(ms), navigate() {}, refreshState: async () => {}, taskProgressPresentation, taskStageLabel, taskProgressCaption, uploadProgressCaption, Date, URLSearchParams,
     api: async (url, options) => { requests.push({ url, options }); return url.endsWith('/channels') ? { channels: [{ id: '101', name: '前场' }, { id: '201', name: '后场' }] } : { status: 'queued', queuePosition: 1 }; },
   });
   vm.runInContext(script.slice(script.indexOf('function fillCameras('), script.indexOf('function segmentBounds(')), context);
@@ -191,7 +191,9 @@ test('task card shows stage and measured elapsed media without a fake overall pe
   const { context } = harness();
   const card = context.makeTaskCard({ taskId: 'stage', status: 'converting', stage: 'concatenating', progress: 93, stagePercent: null, processedSeconds: 120, message: '正在拼接 9 个文件', progressUpdatedAt: Date.now() }, false);
   assert.equal(card.children[0].children[1].textContent, '拼接 MP4');
-  assert.match(card.children[2].className, /indeterminate/);
+  assert.equal(card.children[2].tagName, 'PROGRESS');
+  assert.equal(card.children[2].max, 100);
+  assert.equal(card.children[2]._value, '', 'indeterminate progress has no value');
   assert.match(card.children.at(-1).children[1].textContent, /已处理 120 秒/);
   assert.doesNotMatch(card.children.at(-1).children[1].textContent, /93%/);
   const done = context.makeTaskCard({ taskId: 'stage', status: 'completed', progress: 100, stage: 'concatenating', stagePercent: null }, false);

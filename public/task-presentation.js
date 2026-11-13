@@ -129,6 +129,45 @@ export function createTransferSampler({ windowMs = 5000 } = {}) {
 /** Stable task roots and independent per-tab scroll/count. No list-wide replacement. */
 export function createTaskFeed(options) { return createCollectionFeed(options); }
 
+const shanghai = { timeZone: 'Asia/Shanghai' };
+const dateHeading = new Intl.DateTimeFormat('zh-CN', { ...shanghai, month: '2-digit', day: '2-digit' });
+const cardClock = new Intl.DateTimeFormat('zh-CN', { ...shanghai, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const cardTimestamp = new Intl.DateTimeFormat('zh-CN', {
+  ...shanghai, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
+});
+
+function playingCard(parent) {
+  const media = [...parent.querySelectorAll('video')].find(video => !video.paused && !video.ended);
+  return media?.closest('[data-task-id]');
+}
+
+// A playing output stays attached even on browsers without atomic DOM moves.
+function orderFeedChildren(parent, ordered, player) {
+  if (ordered.every((node, index) => parent.children[index] === node)) return;
+  const atomic = typeof parent.moveBefore === 'function';
+  const playingIndex = !atomic && player ? ordered.indexOf(player) : -1;
+
+  function place(node, before) {
+    if (atomic && node.isConnected && parent.isConnected) parent.moveBefore(node, before);
+    else parent.insertBefore(node, before);
+  }
+
+  const prefixLength = playingIndex < 0 ? ordered.length : playingIndex;
+  for (let index = 0; index < prefixLength; index++) {
+    const next = parent.children[index] || null;
+    if (next !== ordered[index]) place(ordered[index], next);
+  }
+  if (playingIndex >= 0) {
+    // Place the remaining siblings from the end, leaving the live media subtree untouched.
+    let next = null;
+    for (let index = ordered.length - 1; index > playingIndex; index--) {
+      const node = ordered[index];
+      if (node.parentNode !== parent || node.nextElementSibling !== next) place(node, next);
+      next = node;
+    }
+  }
+}
+
 // Tasks and the output library share one pagination/anchor implementation.
 // Library cards update their own controls and keep media nodes attached.
 export function createCollectionFeed({ list, scroller, sentinel, makeCard, createdAt = () => 0,
@@ -138,14 +177,22 @@ export function createCollectionFeed({ list, scroller, sentinel, makeCard, creat
   const nodes = new Map(), signatures = new WeakMap();
   let savedScroll = 0, savedAnchor = [];
   const visiblePanel = () => isVisible() && !scroller.hidden && (!scroller.getClientRects || scroller.getClientRects().length > 0);
-  function hasLayout(card) {
-    if (!card || (card.getClientRects && !card.getClientRects().length) || card.closest?.('details:not([open])')) return false;
-    const rect = card.getBoundingClientRect(); return rect.bottom > rect.top;
+  function cardBounds(card) {
+    if (!card || card.closest?.('details:not([open])')) return null;
+    const rect = card.getBoundingClientRect();
+    return rect.bottom > rect.top ? rect : null;
   }
   function captureAnchor() {
     if (!scroller.getBoundingClientRect) return [];
     const bounds = scroller.getBoundingClientRect();
-    return [...list.querySelectorAll('[data-task-id]')].filter(card => { if (!hasLayout(card)) return false; const r = card.getBoundingClientRect(); return r.bottom > bounds.top && r.top < bounds.bottom - 44; }).map(card => ({ id: card.dataset.taskId, offset: card.getBoundingClientRect().top - bounds.top }));
+    const anchors = [];
+    for (const card of list.querySelectorAll('[data-task-id]')) {
+      const rect = cardBounds(card);
+      if (rect && rect.bottom > bounds.top && rect.top < bounds.bottom - 44) {
+        anchors.push({ id: card.dataset.taskId, offset: rect.top - bounds.top });
+      }
+    }
+    return anchors;
   }
   scroller.addEventListener('scroll', () => { if (visiblePanel()) { savedScroll = scroller.scrollTop; savedAnchor = captureAnchor(); } });
   const key = task => String(task.taskId || task.id);
@@ -156,26 +203,47 @@ export function createCollectionFeed({ list, scroller, sentinel, makeCard, creat
     const anchors = resumeAnchor || (shown ? captureAnchor() : savedAnchor);
     const retained = anchors.find(anchor => tasks.some(task => key(task) === anchor.id && (!task.archivedAt || nodes.get('archive')?.open === true)));
     const index = retained ? tasks.findIndex(task => key(task) === retained.id) : -1;
-    if (index >= limit) limit = Math.ceil((index + 1) / pageSize) * pageSize;
+    const focused = document.activeElement && list.contains(document.activeElement) ? document.activeElement : null;
+    const focusCard = focused?.closest('[data-task-id]');
+    const player = playingCard(list);
+    let lastNeeded = index;
+    for (const card of [player, focusCard]) {
+      if (card) lastNeeded = Math.max(lastNeeded, tasks.findIndex(task => key(task) === card.dataset.taskId));
+    }
+    if (lastNeeded >= limit) limit = Math.ceil((lastNeeded + 1) / pageSize) * pageSize;
     const visible = tasks.slice(0, limit), wanted = new Set(), ordered = [];
-    let lastDate = null, archiveGroup = null, archiveIndex = 1;
+    const archived = [];
+    let lastDate = null, archiveGroup = null;
     for (const task of visible) {
       const timestamp = createdAt(task);
       if (groupDates && priority(task) === 2) {
-        const date = timestamp ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit' }).format(timestamp) : '较早';
+        const date = timestamp ? dateHeading.format(timestamp) : '较早';
         if (date !== lastDate) { lastDate = date; const id = 'date:' + date; wanted.add(id); let group = nodes.get(id); if (!group) { group = document.createElement('h3'); group.className = 'task-date-heading'; group.textContent = date; nodes.set(id,group); } ordered.push(group); }
       }
       const id = 'task:' + key(task); wanted.add(id);
       let card = nodes.get(id);
       const fresh = makeCard(task);
-      if (decorateTime && timestamp) { const time = document.createElement('time'); time.className = 'task-created-at'; time.dateTime = new Date(timestamp).toISOString(); time.textContent = new Date(timestamp).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }); time.title = (task.retryRequestedAt ? '重试于 ' : '创建于 ') + new Date(timestamp).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'}) + '（北京时间）'; time.setAttribute('aria-label',time.title); fresh.append(time); }
-      if (!card) { card = fresh; card.dataset.taskId = key(task); nodes.set(id,card); signatures.set(card, fresh.outerHTML); }
-      else if (fresh !== card) {
-        // Keep the article identity and unchanged controls (including focused buttons).
-        const focused = card.contains(document.activeElement) ? document.activeElement : null;
-        const actionIndex = focused ? [...card.querySelectorAll('button')].indexOf(focused) : -1;
+      if (decorateTime && timestamp) {
+        const time = document.createElement('time');
+        time.className = 'task-created-at';
+        time.dateTime = new Date(timestamp).toISOString();
+        time.textContent = cardClock.format(timestamp);
+        time.title = (task.retryRequestedAt ? '重试于 ' : '创建于 ') + cardTimestamp.format(timestamp) + '（北京时间）';
+        time.setAttribute('aria-label', time.title);
+        fresh.append(time);
+      }
+      if (!card) {
+        card = fresh;
+        signatures.set(card, fresh.outerHTML);
+        card.dataset.taskId = key(task);
+        nodes.set(id, card);
+      } else if (fresh !== card) {
         const signature = fresh.outerHTML;
-        if (signatures.get(card) !== signature) { card.className = fresh.className; while (card.firstChild) card.removeChild(card.firstChild); while (fresh.firstChild) card.append(fresh.firstChild); if (actionIndex >= 0) card.querySelectorAll('button')[actionIndex]?.focus({ preventScroll: true }); }
+        if (signatures.get(card) !== signature) {
+          card.className = fresh.className;
+          while (card.firstChild) card.removeChild(card.firstChild);
+          while (fresh.firstChild) card.append(fresh.firstChild);
+        }
         signatures.set(card, signature);
       }
       if (task.archivedAt) {
@@ -184,7 +252,7 @@ export function createCollectionFeed({ list, scroller, sentinel, makeCard, creat
           if (!archiveGroup) { archiveGroup = document.createElement('details'); archiveGroup.className = 'removed-records'; const summary = document.createElement('summary'); archiveGroup.append(summary); nodes.set(groupId, archiveGroup); }
           archiveGroup.children[0].textContent = '已移除记录 · ' + tasks.filter(item => item.archivedAt).length; ordered.push(archiveGroup);
         }
-        if (archiveGroup.children[archiveIndex] !== card) archiveGroup.insertBefore(card, archiveGroup.children[archiveIndex] || null); archiveIndex++;
+        archived.push(card);
       } else ordered.push(card);
     }
     if (!visible.length) {
@@ -198,16 +266,41 @@ export function createCollectionFeed({ list, scroller, sentinel, makeCard, creat
       empty.textContent = typeof emptyText === 'function' ? emptyText() : emptyText;
       ordered.push(empty);
     }
-    for (const [id,node] of nodes) if (!wanted.has(id)) { node.remove(); nodes.delete(id); }
-    ordered.forEach((node,index) => { if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null); });
+    const previousArchive = nodes.get('archive');
+    for (const [id, node] of nodes) {
+      if (wanted.has(id)) continue;
+      if (node !== previousArchive) node.remove();
+      nodes.delete(id);
+    }
+    orderFeedChildren(list, ordered, player);
+    if (archiveGroup) orderFeedChildren(archiveGroup, [archiveGroup.children[0], ...archived], player);
+    // Unwrap any restored records while their former archive is still attached.
+    else previousArchive?.remove();
+
+    if (focused && document.activeElement === document.body) {
+      const closedGroup = focusCard?.closest('details:not([open])');
+      if (closedGroup) closedGroup.querySelector('summary').focus({ preventScroll: true });
+      else if (list.contains(focused)) focused.focus({ preventScroll: true });
+      else if (focusCard && list.contains(focusCard)) {
+        // Never transfer focus to a different task action at the old button index.
+        const label = button => button.getAttribute('aria-label') || button.textContent;
+        const replacement = [...focusCard.querySelectorAll('button:not(:disabled)')].find(button => label(button) === label(focused));
+        if (!replacement) focusCard.tabIndex = -1;
+        (replacement || focusCard).focus({ preventScroll: true });
+      }
+    }
     sentinel.hidden = limit >= tasks.length;
     sentinel.textContent = sentinel.hidden ? '' : '正在载入更多…';
     savedScroll = scroll;
     if (shown) {
       const maximum = scroller.scrollHeight - scroller.clientHeight;
       scroller.scrollTop = Math.max(0, Number.isFinite(maximum) ? Math.min(scroll, Math.max(0, maximum)) : scroll);
-      const anchor = anchors.find(item => hasLayout(nodes.get('task:' + item.id)));
-      if (anchor && scroller.getBoundingClientRect) scroller.scrollTop += nodes.get('task:' + anchor.id).getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset;
+      for (const anchor of anchors) {
+        const rect = cardBounds(nodes.get('task:' + anchor.id));
+        if (!rect) continue;
+        scroller.scrollTop += rect.top - scroller.getBoundingClientRect().top - anchor.offset;
+        break;
+      }
       savedScroll = scroller.scrollTop; savedAnchor = captureAnchor();
     }
   }
@@ -221,8 +314,9 @@ export function createCollectionFeed({ list, scroller, sentinel, makeCard, creat
     if (index >= limit) { limit = Math.ceil((index + 1) / pageSize) * pageSize; render(); }
     if (tasks[index].archivedAt && nodes.get('archive')) nodes.get('archive').open = true;
     const card = nodes.get('task:' + key(tasks[index]));
-    if (!hasLayout(card)) return false;
-    const top = scroller.scrollTop + card.getBoundingClientRect().top - bounds.top;
+    const rect = cardBounds(card);
+    if (!rect) return false;
+    const top = scroller.scrollTop + rect.top - bounds.top;
     const maximum = scroller.scrollHeight - scroller.clientHeight;
     scroller.scrollTop = Math.max(0, Number.isFinite(maximum) ? Math.min(top, Math.max(0, maximum)) : top);
     savedScroll = scroller.scrollTop; savedAnchor = captureAnchor();

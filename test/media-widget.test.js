@@ -46,11 +46,11 @@ test('媒体组件通过 MCP 发现和读取，视频与图片工具声明模板
 });
 
 test('组件接收图片与视频结果，保留签名，拒绝外部地址，未完成调用状态工具', async () => {
-  const resource = mediaWidgetResource('https://camera.example');
+  const resource = mediaWidgetResource('https://camera.example/console/');
   const script = resource.text.match(/<script>([\s\S]*)<\/script>/)[1];
   const listeners = {}, posts = [], nodes = {};
   let poll;
-  for (const id of ['status', 'media', 'link']) nodes[id] = { replaceChildren() { this.children = []; }, append(node) { this.children.push(node); }, children: [] };
+  for (const id of ['status', 'media', 'link']) nodes[id] = { removeAttribute(name) { delete this[name]; }, replaceChildren() { this.children = []; }, append(node) { this.children.push(node); }, insertBefore(node, before) { this.children.splice(before ? this.children.indexOf(before) : this.children.length, 0, node); }, children: [] };
   const parent = { postMessage(message) { posts.push(message); } };
   const window = { parent, addEventListener(name, fn) { listeners[name] = fn; } };
   vm.runInNewContext(script, { window, document: { getElementById: id => nodes[id], body: { scrollHeight: 400 }, createElement: name => ({ tagName: name.toUpperCase() }) },
@@ -59,7 +59,7 @@ test('组件接收图片与视频结果，保留签名，拒绝外部地址，�
   send({ id: posts[0].id, result: {} });
   await Promise.resolve();
   for (const relative of ['images/snapshot/12345678-1234-1234-1234-123456789abc.png', 'videos/clips/12345678-1234-1234-1234-123456789abc.mp4']) {
-    const artifactUrl = `https://camera.example/artifacts/${relative}?expires=123&signature=abc`;
+    const artifactUrl = `https://camera.example/console/artifacts/${relative}?expires=123&signature=abc`;
     send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl } } });
     if (relative.endsWith('mp4')) assert.equal(nodes.media.children[0].src, artifactUrl);
     assert.equal(nodes.link.href, artifactUrl);
@@ -69,12 +69,22 @@ test('组件接收图片与视频结果，保留签名，拒绝外部地址，�
       video.muted = false;
       send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl } } });
       assert.equal(nodes.media.children[0], video); assert.equal(video.muted, false);
+      const renewed = artifactUrl.replace('signature=abc', 'signature=renewed');
+      send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl: renewed } } });
+      assert.equal(nodes.media.children[0], video, 'renewing a signature must not interrupt playback');
+      assert.equal(nodes.link.href, renewed);
 
       const batch = { status: 'completed', total: 1, files: [{ filename: '回放.mp4', artifactUrl }] };
       send({ method: 'ui/notifications/tool-result', params: { structuredContent: batch } });
       assert.equal(nodes.media.children[0].tagName, 'A');
       assert.equal(nodes.media.children[0].href, artifactUrl);
       assert.equal(nodes.link.hidden, true);
+      const anchor = nodes.media.children[0];
+      send({ method: 'ui/notifications/tool-result', params: { structuredContent: { ...batch,
+        files: [{ filename: '续签.mp4', artifactUrl: renewed }] } } });
+      assert.equal(nodes.media.children[0], anchor);
+      assert.equal(anchor.href, renewed);
+      assert.equal(anchor.textContent, '续签.mp4');
 
       send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl } } });
       assert.equal(nodes.media.children[0].tagName, 'VIDEO', '同一个文件重新作为单段结果时恢复播放器');
@@ -86,9 +96,21 @@ test('组件接收图片与视频结果，保留签名，拒绝外部地址，�
   }
   send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl: 'https://evil.example/file' } } });
   assert.equal(nodes.status.textContent, '媒体地址不受信任');
+  assert.equal(nodes.media.children.length, 0);
+  assert.equal(nodes.link.hidden, true);
+  assert.equal(nodes.link.href, undefined);
+  send({ method: 'ui/notifications/tool-result', params: { structuredContent: { status: 'completed', artifactUrl: 'https://camera.example/another/artifacts/videos/clips/12345678-1234-1234-1234-123456789abc.mp4' } } });
+  assert.equal(nodes.link.hidden, true);
   send({ method: 'ui/notifications/tool-result', params: { structuredContent: { taskId: 'job', status: 'processing' } } });
   poll();
   const call = posts.find(item => item.method === 'tools/call');
   assert.equal(call.params.name, 'get_export_status');
   assert.equal(call.params.arguments.taskId, 'job');
+  const latest = 'https://camera.example/console/artifacts/videos/clips/12345678-1234-1234-1234-123456789abc.mp4?signature=new';
+  send({ method: 'ui/notifications/tool-result', params: { structuredContent: { taskId: 'other', status: 'completed', artifactUrl: latest } } });
+  send({ id: call.id, result: { structuredContent: { taskId: 'job', status: 'error', message: '旧任务失败' } } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(nodes.link.href, latest);
+  assert.equal(nodes.media.children[0].src, latest);
+  assert.equal(nodes.status.textContent, '已生成');
 });

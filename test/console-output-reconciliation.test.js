@@ -52,6 +52,52 @@ test('repeated renders keep exactly one card per output and leave playing video 
   assert.equal(list.children.length, 4); assert.deepEqual(list.children, cards); assert.equal(h.$('library-summary').textContent, '4 个视频'); assert.equal(list.inserts, inserts);
   assert.equal(cards[0].find(node => node.tag === 'video'), video); assert.equal(video.paused, false); assert.equal(video.currentTime, 42); assert.equal(video.muted, false); assert.equal(video.loads, loads); assert.equal(video.pauses, pauses);
 });
+test('reordering 45 outputs retains a playing card across page boundaries and restores keyboard focus', async () => {
+  for (const atomic of [false, true]) {
+    const h = harness();
+    const document = h.context.document;
+    const list = h.$('output-list');
+    h.state.outputs = Array.from({ length: 45 }, (_, index) => ({
+      id: `clip-${index}`, filename: `clip-${index}.mp4`, streamUrl: `/stream/${index}`,
+      size: 100, modifiedAt: 1800000000000 - index * 1000,
+    }));
+    h.context.renderOutputs();
+    const playerCard = list.children[1], focusedCard = list.children[0];
+    const control = focusedCard.find(node => node.tag === 'button');
+    const video = playerCard.find(node => node.tag === 'video');
+    await playerCard.find(node => node.className === 'output-poster').click();
+    video.currentTime = 42;
+    document.activeElement = control;
+    control.focus = () => { document.activeElement = control; };
+    control.closest = () => focusedCard;
+    focusedCard.closest = () => null;
+    video.closest = () => playerCard;
+    list.contains = node => list.children.some(card => card === node || card.find(child => child === node));
+    list.querySelectorAll = selector => selector === 'video' ? [video] : [];
+    const insert = list.insertBefore.bind(list);
+    list.isConnected = true;
+    for (const card of list.children) card.isConnected = true;
+    list.insertBefore = (card, next) => {
+      if (card === playerCard) video.pause();
+      if (card === focusedCard) document.activeElement = document.body;
+      insert(card, next);
+    };
+    let moves = 0;
+    if (atomic) list.moveBefore = (card, next) => {
+      assert.ok(card.isConnected, 'newly created cards require initial insertion');
+      moves++;
+      insert(card, next);
+    };
+    h.context.toggleOutputSort();
+    assert.deepEqual(list.children.map(card => card.outputFile.id), h.state.outputs.map(file => file.id).reverse());
+    assert.equal(list.children.at(-2), playerCard);
+    assert.equal(video.paused, false);
+    assert.equal(video.currentTime, 42);
+    assert.equal(document.activeElement, control);
+    if (atomic) assert.ok(moves > 0);
+  }
+});
+
 test('session reset removes disposed card shells and re-login builds four complete cards only', () => {
   const h = harness(); h.context.renderOutputs(); const oldCards = [...h.$('output-list').children];
   h.context.loggedOut(); assert.equal(h.$('output-list').children.length, 0); assert.equal(h.outputCards.size, 0); assert.ok(oldCards.every(card => !card.parent));
@@ -91,7 +137,7 @@ test('upload and more are separate accessible SVG actions with separate menus an
 
 test('both navigation surfaces pair all four icons with visible names and one task badge', () => {
   const html = statusDashboardPage();
-  const menus = [html.match(/<aside class="side-nav"[\s\S]*?<\/aside>/)[0], html.match(/<nav class="mobile-nav"[\s\S]*?<\/nav>/)[0]];
+  const menus = [html.match(/<nav class="side-nav"[\s\S]*?<\/nav>/)[0], html.match(/<nav class="mobile-nav"[\s\S]*?<\/nav>/)[0]];
   for (const nav of menus) {
     for (const label of ['回放', '成片', '任务', '设置']) {
       assert.ok(nav.includes(`aria-label="${label}" title="${label}"`));

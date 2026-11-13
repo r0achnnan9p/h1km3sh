@@ -8,20 +8,23 @@ function harness({ showFails = false } = {}) {
   const closes = [], scrolls = [];
   let document;
   class Node {
-    constructor(tag) { this.tag = tag; this.children = []; this.listeners = {}; this.props = new Map(); this.classes = new Set(); this.isConnected = true; this.disabled = false; this.style = { setProperty: (k,v) => this.props.set(k,v), getPropertyValue: k => this.props.get(k) || '', removeProperty: k => this.props.delete(k) }; this.classList = { add: k => this.classes.add(k), remove: k => this.classes.delete(k), contains: k => this.classes.has(k) }; }
+    constructor(tag) { this.tag = tag; this.children = []; this.listeners = {}; this.attributes = {}; this.props = new Map(); this.classes = new Set(); this.isConnected = true; this.disabled = false; this.style = { setProperty: (k,v) => this.props.set(k,v), getPropertyValue: k => this.props.get(k) || '', removeProperty: k => this.props.delete(k) }; this.classList = { add: k => this.classes.add(k), remove: k => this.classes.delete(k), contains: k => this.classes.has(k) }; }
     append(...nodes) { for (const n of nodes) { n.parent = this; this.children.push(n); } }
     remove() { this.isConnected = false; if (this.parent) this.parent.children = this.parent.children.filter(n => n !== this); }
     contains(node) { return node === this || this.children.some(child => child.contains(node)); }
     matches() { return false; }
     setPointerCapture() {}
-    setAttribute() {}
+    setAttribute(key, value) { this.attributes[key] = value; }
     addEventListener(k,f) { (this.listeners[k] ||= []).push(f); }
     removeEventListener(k,f) { this.listeners[k] = (this.listeners[k] || []).filter(x => x !== f); }
     emit(k, target = this, fields = {}) { for (const f of this.listeners[k] || []) f({ target, preventDefault() {}, ...fields }); }
     focus(options) { document.activeElement = this; this.focusOptions = options; }
     showModal() { if (showFails) throw new Error('modal unavailable'); this.open = true; }
     close() { if (this.open) { this.open = false; closes.push(() => this.emit('close')); } }
-    querySelectorAll() { return this.children.flatMap(n => [n, ...n.querySelectorAll()]).filter(n => ['button','input'].includes(n.tag)); }
+    querySelectorAll(selector) {
+      const tags = selector.split(',').map(tag => tag.trim());
+      return this.children.flatMap(node => [...(tags.includes(node.tag) ? [node] : []), ...node.querySelectorAll(selector)]);
+    }
   }
   const root = new Node('html'); root.clientHeight = 873;
   const previous = new Node('button');
@@ -50,7 +53,13 @@ test('dirty and pending dismissal keep modal and background lock until explicit 
   const h = harness(), sheet = h.context.openDialog('编辑');
   sheet.dialog.emit('input'); sheet.dialog.emit('cancel'); assert.equal(sheet.dialog.open, true); assert.match(sheet.error.textContent, /未保存/);
   sheet.setPending(true); sheet.dialog.emit('cancel'); assert.equal(sheet.dialog.open, true); assert.ok(h.root.classList.contains('dialog-scroll-locked'));
-  sheet.setPending(false); sheet.dialog.emit('cancel'); h.closes.shift()(); assert.equal(h.root.classList.contains('dialog-scroll-locked'), false);
+  sheet.setPending(false); sheet.dialog.emit('cancel');
+  const [keep, discard] = sheet.dialog.children.at(-1).children;
+  assert.equal(sheet.dialog.open, true);
+  assert.equal(keep.attributes['aria-describedby'], sheet.error.id);
+  assert.equal(keep, h.document.activeElement);
+  discard.emit('click'); h.closes.shift()();
+  assert.equal(h.root.classList.contains('dialog-scroll-locked'), false);
 });
 test('failed showModal does not leave page scroll locked', () => {
   const h = harness({ showFails: true }); assert.throws(() => h.context.openDialog('设置'), /modal unavailable/);
@@ -79,5 +88,26 @@ test('a phone sheet pull dismisses clean content and keeps edits until explicit 
   const dirty = h.context.openDialog('编辑', '', { initialDirty: true });
   pull(dirty); pull(dirty);
   assert.equal(dirty.dialog.open, true); assert.match(dirty.error.textContent, /未保存/);
-  dirty.dialog.children[0].children[1].emit('click'); assert.equal(dirty.dialog.open, false);
+  dirty.dialog.children[0].children[1].emit('click'); assert.equal(dirty.dialog.open, true);
+  dirty.dialog.children.at(-1).children[1].emit('click'); assert.equal(dirty.dialog.open, false);
+});
+
+test('a guarded route change and repeated platform dismissals keep a dirty editor until explicit discard', () => {
+  const h = harness(), sheet = h.context.openDialog('编辑');
+  const input = h.document.createElement('input'); sheet.content.append(input); input.focus();
+  sheet.dialog.emit('input', input);
+  assert.equal(h.context.dismissActiveDialog(), false);
+  const [keep] = sheet.dialog.children.at(-1).children;
+  sheet.dialog.emit('cancel'); assert.equal(h.context.dismissActiveDialog(), false);
+  assert.equal(sheet.actions.hidden, true); keep.emit('click');
+  assert.equal(h.document.activeElement, input);
+  assert.equal(sheet.actions.hidden, false); assert.equal(sheet.dialog.open, true);
+  const select = h.document.createElement('select'), textarea = h.document.createElement('textarea');
+  select.disabled = true; sheet.content.append(select, textarea);
+  sheet.setPending(true); sheet.setPending(true); assert.equal(h.context.dismissActiveDialog(), false);
+  assert.equal(textarea.disabled, true); sheet.setPending(false);
+  assert.equal(select.disabled, true); assert.equal(textarea.disabled, false);
+  assert.equal(h.context.dismissActiveDialog(), false);
+  sheet.dialog.children.at(-1).children[1].emit('click');
+  assert.equal(h.context.dismissActiveDialog(), true);
 });

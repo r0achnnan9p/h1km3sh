@@ -3,7 +3,7 @@ import { createOutputDownload } from './output-download.js';
 import { iconSvg, setButtonIcon, createSettingsRow, formatClipDuration, createSlidingNavigation } from './ui-primitives.js';
 import { createUploadAccounts } from './upload-accounts.js';
 import { createOutputPlayers } from './output-player.js';
-import { activeDialog, openDialog, labelledInput, bindEnterConfirm, normalizeMp4Name, rangeTimeMs, openCalendar, enhanceTimeInput } from './touch-controls.js';
+import { activeDialog, dismissActiveDialog, createDiscardGuard, openDialog, labelledInput, bindEnterConfirm, normalizeMp4Name, rangeTimeMs, openCalendar, enhanceTimeInput } from './touch-controls.js';
 import { setupDebugMark } from './debug-mark.js';
 import { startMediaMtxLive } from './mediamtx-live-player.js';
 import { listCoverageGaps, formatCoverageGap } from './playback-coverage.js';
@@ -221,8 +221,11 @@ function requestLogout() {
 
 function navigate(view, updateHistory = true) {
   if (!['replay', 'library', 'tasks', 'settings'].includes(view)) view = 'replay';
-  if (view !== 'settings' && settingsInline && !settingsInline.requestClose(`view:${view}`)) {
-    if (!updateHistory) history.replaceState(null, '', '#settings'); return;
+  const resume = () => navigate(view);
+  if ((activeDialog?.open && !dismissActiveDialog(resume)) ||
+      (view !== 'settings' && settingsInline && !settingsInline.requestClose(resume))) {
+    if (!updateHistory) history.pushState(null, '', `#${document.body.dataset.view}`);
+    return;
   }
   const generation = navigate.generation = (navigate.generation || 0) + 1;
   const applyNavigation = () => {
@@ -232,7 +235,6 @@ function navigate(view, updateHistory = true) {
     if (updateHistory && location.hash !== `#${view}`) history.pushState(null, '', `#${view}`);
     if (view !== 'replay') clearReplay();
     if (view !== 'library') outputPlayers.pauseAll();
-    activeDialog?.close();
     document.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.panel === view));
     if (view === 'tasks' && typeof taskFeeds !== 'undefined') {
       if (pendingTaskFocus) selectTaskTab(pendingTaskFocus.kind === 'uploads');
@@ -1812,7 +1814,15 @@ function makeTaskCard(task, uploadTask) {
     timing.textContent = `SDK 按时间取回 · 实际成片 ${task.sdkMetadata.actualDurationSeconds.toFixed(1)} 秒；关键帧起止尚未精确对齐，请核对画面时钟。`;
     card.append(timing);
   }
-  if (progress.show) { const track = document.createElement('div'); track.setAttribute('role', 'progressbar'); track.setAttribute('aria-label', taskStageLabel(task) || statusText(task.status)); track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100'); if (progress.hasPercent) track.setAttribute('aria-valuenow', String(progress.percent)); track.className = `progress-track${progress.indeterminate ? ' indeterminate' : progress.hasPercent ? '' : ' waiting'}`; if (progress.indeterminate) track.setAttribute('aria-valuetext', taskStageLabel(task) || (task.status === 'uploading' ? '等待上传进度回报' : '正在处理'));  const fill = document.createElement('div'); fill.className = 'progress-fill'; if (progress.hasPercent) fill.style.width = `${progress.percent}%`; track.append(fill); card.append(track); }
+  if (progress.show && (progress.hasPercent || progress.indeterminate)) {
+    const track = document.createElement('progress');
+    track.className = 'progress-track';
+    track.max = 100;
+    track.setAttribute('aria-label', taskStageLabel(task) || statusText(task.status));
+    if (progress.hasPercent) track.value = progress.percent;
+    else track.setAttribute('aria-valuetext', taskStageLabel(task) || (uploadTask ? '等待上传进度回报' : '正在处理'));
+    card.append(track);
+  }
   const footer = document.createElement('div');
   footer.className = `task-footer${task.provider === 'cloud189' && task.status === 'unknown' ? ' recovery-actions' : ''}`;
   const left = document.createElement('span');
@@ -2107,10 +2117,6 @@ function registerConfigDraft(sheet, resume) {
 }
 function setConfigPending(sheet, pending) {
   sheet.context.pending = pending; sheet.setPending(pending);
-  for (const select of sheet.dialog.querySelectorAll('select')) {
-    if (pending) { select.dataset.wasDisabled = String(select.disabled); select.disabled = true; }
-    else { select.disabled = select.dataset.wasDisabled === 'true'; delete select.dataset.wasDisabled; }
-  }
 }
 async function configRequest(path, method, values, revision) {
   if (!consoleConfig || consoleConfig.preparationOnly) throw new Error('准备模式为只读；请在服务器本机完成配置开放后重试。');
@@ -2321,20 +2327,18 @@ function renderMediaMtxSettings(sheet, draft = null) {
   const input = labelledInput(sheet.content, '回放服务地址（Playback URL）', draft ?? consoleConfig?.mediamtx?.playbackUrl ?? '', { placeholder: 'http://mediamtx:9996', maxLength: 2048 }); input.inputMode = 'url';
   const help = document.createElement('p'); help.className = 'setting-help'; help.textContent = '只修改应用使用的回放服务地址，不修改录像根目录、SRT 或 MediaMTX 服务。'; sheet.content.append(help);
   // baseline 是输入框与服务器一致时的值；偏离它才算有未保存的修改。
-  let baseline = consoleConfig?.mediamtx?.playbackUrl ?? '', armedDiscard = null;
+  let baseline = consoleConfig?.mediamtx?.playbackUrl ?? '';
   // 只有真的改过地址才登记草稿：未改动时会话过期不应恢复一个“未保存的输入”。
   let draftRegistered = false;
-  input.addEventListener('input', () => { armedDiscard = null; if (!draftRegistered) { draftRegistered = true; registerConfigDraft(sheet, () => openMediaMtxEditor(input.value)); } });
-  // 通道入口会替换当前弹层：地址有未保存修改时，同一入口第二次点击才算明确放弃。
-  const guarded = (key, open) => () => {
-    if (input.value !== baseline && armedDiscard !== key) { armedDiscard = key; sheet.error.textContent = '回放地址尚未保存，再次点击将放弃修改。'; return; }
-    open();
+  input.addEventListener('input', () => { if (!draftRegistered) { draftRegistered = true; registerConfigDraft(sheet, () => openMediaMtxEditor(input.value)); } });
+  const guarded = open => () => {
+    if (input.value === baseline || sheet.requestClose(open)) open();
   };
   if (draft !== null) { draftRegistered = true; registerConfigDraft(sheet, () => openMediaMtxEditor(input.value)); }
   const bar = document.createElement('div'); bar.className = 'settings-toolbar';
   const heading = document.createElement('h3'); heading.textContent = '通道'; bar.append(heading);
   const refresh = addSettingsRefresh(bar, sheet, loadConsoleConfig, '重新读取来源配置', '来源配置已刷新。');
-  const add = setButtonIcon(addButton(bar, '', 'quiet-button ui-icon-button', guarded('add', () => openCameraEditor())), 'add', '手动补充通道');
+  const add = setButtonIcon(addButton(bar, '', 'quiet-button ui-icon-button', guarded(() => openCameraEditor())), 'add', '手动补充通道');
   const list = document.createElement('div'); list.className = 'config-list';
   sheet.content.append(bar, list);
   const save = addButton(sheet.actions, '保存地址', 'primary-button', () => runConfigAction(sheet, async () => {
@@ -2354,7 +2358,7 @@ function renderMediaMtxSettings(sheet, draft = null) {
       const dvr = config.dvrs.find(item => item.id === camera.deviceId);
       const title = camera.name && camera.name !== camera.id ? `${camera.name} · ${camera.id}` : camera.id;
       const detail = [camera.archivePath && camera.archivePath !== camera.id ? `路径 ${camera.archivePath}` : '', camera.deviceId ? `${dvr?.name || camera.deviceId} / ${camera.channel}` : ''].filter(Boolean).join(' · ');
-      list.append(createSettingsRow({ document, title, detail, disabled: locked, onClick: guarded(`camera:${camera.id}`, () => openCameraEditor(camera)) }));
+      list.append(createSettingsRow({ document, title, detail, disabled: locked, onClick: guarded(() => openCameraEditor(camera)) }));
     }
     if (!(config?.channels || config?.cameras)?.length) list.textContent = '暂无通道';
   });
@@ -2513,7 +2517,7 @@ function renderPasswordSettings(sheet) {
 function openSettingsContainer(title, description = '', { key, trackChanges = true, initialDirty = false, focusHeading = true } = {}) {
   const host = $('settings-desktop-detail');
   if (!window.matchMedia?.('(min-width: 1024px)').matches || !host) return openDialog(title, description, { trackChanges, initialDirty });
-  if (settingsInline && !settingsInline.requestClose(`settings:${title}`)) return null;
+  if (settingsInline && !settingsInline.requestClose(() => settingsDetails[key]())) return null;
   const dialog = document.createElement('section'); dialog.className = 'settings-inline'; dialog.open = true;
   const row = key ? $(`settings-open-${key}`) : null;
   row?.setAttribute('aria-current', 'true'); row?.setAttribute('aria-controls', 'settings-desktop-detail');
@@ -2523,8 +2527,9 @@ function openSettingsContainer(title, description = '', { key, trackChanges = tr
   const error = document.createElement('p'); error.className = 'dialog-error'; error.setAttribute('role', 'alert');
   const actions = document.createElement('div'); actions.className = 'dialog-actions';
   dialog.append(heading, content, error, actions); host.replaceChildren(dialog);
-  let dirty = Boolean(initialDirty), armed = null, pending = false, closed = false, shell = null, waitingDialog = null;
+  let dirty = Boolean(initialDirty), pending = false, closed = false, shell = null, waitingDialog = null;
   const disabled = new Map();
+  const discard = createDiscardGuard(dialog, actions, error);
   const sheet = { dialog, content, error, actions,
     close() {
       if (closed) return; closed = true;
@@ -2533,15 +2538,19 @@ function openSettingsContainer(title, description = '', { key, trackChanges = tr
       dialog.open = false; dialog.dispatchEvent(new Event('close')); dialog.remove();
       if (shell?.dialog.open) shell.close();
     },
-    requestClose(key) {
+    requestClose(onDiscard) {
       if (pending) { error.textContent = '正在保存，请稍候。'; return false; }
-      if (dirty && armed !== key) { armed = key; error.textContent = '有未保存的修改，再次选择将放弃修改。'; return false; }
-      sheet.close(); return true;
+      if (!dirty) { sheet.close(); return true; }
+      discard.ask(() => {
+        if (pending) return;
+        sheet.close(); onDiscard?.();
+      });
+      return false;
     },
     setPending(value) {
       pending = value; dialog.setAttribute('aria-busy', String(value));
       if (!value) shell?.setPending(false);
-      for (const node of dialog.querySelectorAll('button, input')) {
+      for (const node of dialog.querySelectorAll('button, input, select, textarea')) {
         if (value) { if (!disabled.has(node)) disabled.set(node, node.disabled); node.disabled = true; }
         else node.disabled = disabled.get(node) ?? node.disabled;
       }
@@ -2556,12 +2565,13 @@ function openSettingsContainer(title, description = '', { key, trackChanges = tr
         return;
       }
       // 缩窄窗口时整块移入原生弹层，不重建输入、监听或版本校验上下文。
+      discard.reset();
       shell = openDialog(title, '', { trackChanges, initialDirty: dirty }); shell.content.append(dialog);
       heading.hidden = true; shell.dialog.addEventListener('close', () => sheet.close());
       if (pending) shell.setPending(true);
     },
   };
-  dialog.addEventListener('input', () => { if (trackChanges) { dirty = true; armed = null; } });
+  dialog.addEventListener('input', () => { if (trackChanges) { dirty = true; discard.reset(); } });
   settingsInline = sheet;
   if (focusHeading) heading.focus({ preventScroll: true });
   return sheet;
@@ -2739,7 +2749,7 @@ function openPlaybackDate() {
 }
 
 function reloadApplication() {
-  if (settingsInline && !settingsInline.requestClose('reload-application')) return;
+  if (settingsInline && !settingsInline.requestClose(reloadApplication)) return;
   cancelReplayHold();
   const target = new URL(location.href);
   target.searchParams.set('_reload', String(Date.now()));
