@@ -480,7 +480,7 @@ button.settings-item:hover:not(:disabled) { background: rgba(255,255,255,.06); }
   .console-app .app-dialog { padding-inline: 12px; }
   .console-app .calendar-grid, .console-app .calendar-weekdays { margin-inline: 0; }
 }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after, *::backdrop { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @media (prefers-reduced-transparency: reduce) { .scrub-time-overlay { background: var(--bg); } .console-app .app-dialog::backdrop { background: rgba(0,0,0,.55); } }
 /* Account linking is a discrete flow; live status never replaces form fields. */
 .account-connection { margin: 10px 0; padding: 0; border: 0; background: transparent; }
@@ -1534,13 +1534,15 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
   }
   .console-app .app-dialog:has(.calendar-control) {
     position: fixed; display: flex; flex-direction: column; overflow: hidden;
-    top: max(var(--space-2), var(--safe-top)); right: max(var(--space-3), var(--safe-right)); bottom: auto; left: max(var(--space-3), var(--safe-left));
+    /* 短横屏键盘可平移可视区；安全区内边距不能代替可视区上沿。 */
+    top: calc(var(--dialog-viewport-top, 0px) + max(var(--space-2), var(--safe-top)));
+    right: max(var(--space-3), var(--safe-right)); bottom: auto; left: max(var(--space-3), var(--safe-left));
     width: auto; max-width: none; margin: 0;
     height: calc(min(var(--app-viewport-height), var(--dialog-viewport-height, var(--app-viewport-height))) - max(var(--space-2), var(--safe-top)) - max(var(--space-2), var(--safe-bottom)));
     max-height: calc(min(var(--app-viewport-height), var(--dialog-viewport-height, var(--app-viewport-height))) - max(var(--space-2), var(--safe-top)) - max(var(--space-2), var(--safe-bottom)));
   }
   .console-app .app-dialog:has(.calendar-control) > .dialog-body {
-    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden;
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto;
   }
   .console-app .calendar-control {
     display: grid; flex: 1 1 auto; grid-template-columns: minmax(148px, 200px) minmax(0, 1fr);
@@ -1563,6 +1565,7 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
   .precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) :is(.replay-topbar,.replay-control-panel) { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (orientation: landscape) and (max-height: 540px) and (min-width: 568px) and (max-width: 1023px) and (prefers-reduced-transparency: reduce) {
+  .precision-layout #view-replay.focus-replay .replay-topbar,
   .precision-layout #view-replay.focus-replay .replay-control-panel { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-reduced-motion: reduce) {

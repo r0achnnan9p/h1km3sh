@@ -1015,7 +1015,7 @@ test('iPhone 14 Pro Max replay keeps the export cue, safe landscape chrome and a
 
   await tap(b, { x: 466, y: 40 });
   await sleep(300);
-  await b.evaluate(`document.getElementById('playback-context').click()`);
+  await b.evaluate(`const dateTrigger = document.getElementById('playback-context'); dateTrigger.focus(); dateTrigger.click();`);
   await sleep(300);
   const sheet = await b.evaluate(`(() => {
     const dialog = document.querySelector('dialog[open]');
@@ -1037,6 +1037,55 @@ test('iPhone 14 Pro Max replay keeps the export cue, safe landscape chrome and a
   assert.ok(sheet.top >= -1 && sheet.bottom <= 430 - 21 + 1, `日期弹层让出主屏指示条 ${JSON.stringify(sheet)}`);
   assert.ok(sheet.dayHeight >= 44 && sheet.dayTop >= sheet.top - 1 && sheet.dayBottom <= sheet.bottom + 1, '月末日期可以滚进弹层');
   assert.ok(sheet.todayHeight >= 44 && sheet.todayTop >= sheet.top - 1 && sheet.todayBottom <= sheet.bottom + 1, '今天按钮保持可点');
+
+  // 模拟软键盘既缩小又向下平移可视区；不把桌面模拟当作 Safari 真机。
+  await b.evaluate(`(() => {
+    document.querySelector('dialog[open] .calendar-control input').focus();
+    Object.defineProperties(visualViewport, {
+      height: { configurable: true, value: 278 },
+      offsetTop: { configurable: true, value: 72 }
+    });
+    visualViewport.dispatchEvent(new Event('resize'));
+    visualViewport.dispatchEvent(new Event('scroll'));
+  })()`);
+  await sleep(100);
+  const keyboard = await b.evaluate(`(() => {
+    const dialog = document.querySelector('dialog[open]');
+    const box = dialog.getBoundingClientRect();
+    const visible = el => {
+      const rect = el.getBoundingClientRect();
+      return rect.top >= visualViewport.offsetTop - 1 &&
+        rect.bottom <= visualViewport.offsetTop + visualViewport.height + 1 &&
+        el.contains(document.elementFromPoint(rect.x + rect.width/2, rect.y + rect.height/2));
+    };
+    const input = dialog.querySelector('.calendar-control input');
+    return { top: box.top, bottom: box.bottom, input: visible(input),
+      focus: document.activeElement === input, close: visible(dialog.querySelector('.dialog-close')) };
+  })()`);
+  assert.ok(keyboard.top >= 72 && keyboard.bottom <= 72 + 278 - 21 + 1, JSON.stringify(keyboard));
+  assert.ok(keyboard.input && keyboard.focus && keyboard.close, JSON.stringify(keyboard));
+
+  await b.evaluate(`delete visualViewport.height; delete visualViewport.offsetTop; visualViewport.dispatchEvent(new Event('resize'));`);
+  await sleep(100);
+  assert.ok(Math.abs(await b.evaluate("document.querySelector('dialog[open]').getBoundingClientRect().top") - sheet.top) <= 1);
+
+  await b.send('Emulation.setEmulatedMedia', { features: [
+    { name: 'prefers-reduced-motion', value: 'reduce' },
+    { name: 'prefers-reduced-transparency', value: 'reduce' }
+  ] });
+  const reduced = await b.evaluate(`(() => {
+    const dialog = document.querySelector('dialog[open]');
+    const backdrop = getComputedStyle(dialog, '::backdrop');
+    return { dialog: getComputedStyle(dialog).animationName, backdrop: backdrop.animationName,
+      topbar: getComputedStyle(document.querySelector('.replay-topbar')).backgroundColor,
+      panel: getComputedStyle(document.getElementById('replay-control-panel')).backgroundColor };
+  })()`);
+  assert.equal(reduced.dialog, 'none');
+  assert.equal(reduced.backdrop, 'none');
+  assert.equal(reduced.topbar, reduced.panel);
+  assert.match(reduced.topbar, /^rgb\(/);
   await b.evaluate(`document.querySelector('dialog[open] .dialog-close').click()`);
+  await sleep(50);
+  assert.equal(await b.evaluate("document.querySelector('dialog[open]') === null && document.activeElement.id === 'playback-context'"), true);
   assert.equal(await b.evaluate(`document.getElementById('selection-help').textContent`), '先标记入点，再标记出点。');
 });

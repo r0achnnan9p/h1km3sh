@@ -44,9 +44,11 @@ test('浮在画面上的回放控制使用遮罩且不模糊，日期弹层让�
   assert.match(block, /\.player-placeholder \{[^}]*justify-content: flex-start/);
   assert.match(block, /\.app-dialog \{[^}]*var\(--safe-left\)[^}]*var\(--safe-bottom\)/);
   assert.match(block, /\.app-dialog:has\(\.calendar-control\) \{[^}]*var\(--safe-left\)/);
+  assert.match(block, /\.app-dialog:has\(\.calendar-control\) \{[^}]*top: calc\(var\(--dialog-viewport-top, 0px\) \+ max\(var\(--space-2\), var\(--safe-top\)\)\)[^}]*height: calc\(min\(var\(--app-viewport-height\), var\(--dialog-viewport-height,/);
+  assert.match(block, /\.app-dialog:has\(\.calendar-control\) > \.dialog-body \{[^}]*overflow-y: auto/);
   assert.match(block, /\.calendar-grid \{[^}]*overflow-y: auto/);
   assert.match(css, /#export-range:disabled:not\(\[aria-busy='true'\]\)/);
-  assert.match(css, /prefers-reduced-transparency: reduce\)[\s\S]*background: var\(--surface\)/);
+  assert.match(css, /max-width: 1023px\) and \(prefers-reduced-transparency: reduce\) \{\s*\.precision-layout #view-replay\.focus-replay \.replay-topbar,\s*\.precision-layout #view-replay\.focus-replay \.replay-control-panel \{ background: var\(--surface\)/);
 });
 
 test('动效集中在 token，时间尺不被动效拖慢，减少动效时停掉位移和循环', () => {
@@ -59,6 +61,6 @@ test('动效集中在 token，时间尺不被动效拖慢，减少动效时停�
   assert.match(css, /\.view\.active \{ animation: motion-view var\(--dur\) var\(--ease\) both; \}/);
   assert.match(css, /\.app-dialog\[open\]::backdrop \{ animation: motion-fade var\(--dur\) var\(--ease\) both; \}/);
   assert.match(css, /\.overview-cursor,\.overview-selection,\.time-cursor,\.range-overlay[^}]*transition: none; animation: none/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \*, \*::before, \*::after \{ animation: none !important; transition: none !important;/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \*, \*::before, \*::after, \*::backdrop \{ animation: none !important; transition: none !important;/);
   assert.match(css, /prefers-reduced-motion: reduce\) \{\s*\.player-placeholder\[data-state='loading'\] \.preview-emblem \{ animation: none; \}\s*button:not\(:disabled\):active \{ transform: none; \}/);
 });
