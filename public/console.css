@@ -11,10 +11,14 @@
   --text: #edf4f7; --muted: #b0c1cc; --dim: #9badbb;
   --line: rgba(255,255,255,.16); --accent: #81e5e0; --on-accent: #072926; --tint: rgba(129,229,224,.14);
   --green: #89d9a8; --green-tint: rgba(137,217,168,.14); --coral: #ff9d8a; --warning: #ffd27a;
-  --cyan: var(--accent); --glass: var(--surface2); --glass-strong: var(--surface2);
-  --glass-edge: var(--line); --glass-light: var(--surface);
-  --glass-blur: blur(14px); --glass-prompt-blur: blur(18px);
-  --glass-shadow: none; --glass-prompt-shadow: 0 18px 60px rgba(0,0,0,.35);
+  --cyan: var(--accent);
+  /* Glass is for static chrome. Anything painted over moving video uses --material-scrim and no blur. */
+  --glass: rgba(21,30,40,.78); --glass-strong: rgba(15,22,30,.94); --glass-light: rgba(32,46,59,.88);
+  --glass-edge: rgba(255,255,255,.22); --glass-highlight: rgba(255,255,255,.34);
+  --glass-blur: blur(22px); --glass-prompt-blur: blur(18px);
+  --glass-shadow: 0 10px 28px rgba(0,0,0,.28); --glass-prompt-shadow: 0 18px 48px rgba(0,0,0,.42);
+  --material-scrim: rgba(11,17,24,.92);
+  --workspace-wash: radial-gradient(120% 70% at 0% -10%, var(--tint), transparent 46%), var(--bg);
   --radius-panel: 18px; --radius-video: 16px; --radius-nav: 14px; --radius-transport: 16px; --radius-button: 12px; --radius-toast: 24px; --radius-tile: 10px;
   --recording-band: rgba(137,217,168,.65); --recording-edge: #89d9a8;
   --radius: var(--radius-panel); --sidebar: 160px; --radius-card: 16px; --radius-field: 12px; --fill-well: rgba(0,0,0,.28);
@@ -338,7 +342,7 @@ button.settings-item:hover:not(:disabled) { background: rgba(255,255,255,.06); }
 .password-control input { padding-right: 65px; }
 .password-control button { position: absolute; inset: 0 3px 0 auto; min-height: 44px; min-width: 58px; padding: 8px; border: 0; border-radius: var(--radius-tile); background: transparent; color: var(--muted); font-size: 11px; }
 .password-control button:hover { color: var(--text); background: var(--surface2); }
-.console-app .app-dialog { position: fixed; inset: var(--dialog-viewport-top, 0px) 0 var(--dialog-keyboard-inset, 0px); width: min(530px, calc(100% - 32px)); max-height: calc(min(100dvh, var(--dialog-viewport-height, 100dvh)) - 48px); padding: 24px; border: 1px solid var(--line); border-radius: var(--radius-field); background: var(--surface); color: var(--text); box-shadow: var(--glass-shadow); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.console-app .app-dialog { position: fixed; inset: var(--dialog-viewport-top, 0px) 0 var(--dialog-keyboard-inset, 0px); width: min(530px, calc(100% - 32px)); max-height: calc(min(100dvh, var(--dialog-viewport-height, 100dvh)) - 48px); padding: 24px; border: 1px solid var(--glass-edge); border-radius: var(--radius-field); background: var(--glass-strong); color: var(--text); box-shadow: var(--glass-prompt-shadow); backdrop-filter: none; -webkit-backdrop-filter: none; }
 .console-app .app-dialog::backdrop { background: rgba(0,0,0,.55); backdrop-filter: none; }
 .console-app .dialog-head { margin-bottom: 16px; gap: 12px; }
 .console-app .dialog-head h2 { font-size: 20px; letter-spacing: -.4px; }
@@ -1450,4 +1454,115 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 }
 @media (prefers-reduced-motion:reduce) {
   .precision-layout #view-replay.focus-replay :is(.replay-topbar,.replay-control-panel) { transition:none; }
+}
+
+/* Homepage materials. Blur stays off the video; the timeline and range stay on solid fills. */
+body.precision-layout .console-shell { background: var(--workspace-wash); }
+.precision-layout .side-nav {
+  background: var(--glass-strong); border-right-color: var(--glass-edge);
+  box-shadow: none; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+}
+.precision-layout .nav-item.active { box-shadow: none; }
+.precision-layout #view-replay.focus-replay .precision-track-host {
+  border-radius: var(--radius-field); background: var(--fill-well);
+}
+.precision-layout #view-replay.focus-replay .overview-cursor,
+.precision-layout #view-replay.focus-replay .time-cursor { box-shadow: none; }
+.precision-layout #view-replay.focus-replay .overview-selection::before,
+.precision-layout #view-replay.focus-replay .overview-selection::after {
+  content: ''; position: absolute; top: 0; bottom: 0; width: 3px; background: var(--accent); pointer-events: none;
+}
+.precision-layout #view-replay.focus-replay .overview-selection::before { left: 0; }
+.precision-layout #view-replay.focus-replay .overview-selection::after { right: 0; }
+.precision-layout #view-replay.focus-replay .selection-help { color: var(--muted); }
+.precision-layout #view-replay.focus-replay .selection-help.warning { color: var(--warning); }
+.precision-layout #view-replay.focus-replay .replay-selection-editor[data-selection='partial'] .mark-field:not(:has(.active)) { border-color: var(--warning); }
+.precision-layout #view-replay.focus-replay .mark-field { overflow: visible; }
+.precision-layout #view-replay.focus-replay .mark-field > button:first-child { border-radius: var(--radius-field) 0 0 var(--radius-field); }
+.precision-layout #view-replay.focus-replay .mark-field > button:last-child { border-radius: 0 var(--radius-field) var(--radius-field) 0; }
+.precision-layout #view-replay.focus-replay .replay-actions > #export-range:disabled:not([aria-busy='true']) {
+  opacity: 1; color: var(--muted); background: var(--fill-control);
+}
+.precision-layout #view-replay.focus-replay .replay-actions > #export-range[aria-busy='true'] {
+  opacity: 1; color: var(--on-accent); background: var(--accent);
+}
+.player-placeholder[data-state='loading'] .preview-emblem { animation: spin .8s linear infinite; }
+.player-placeholder[data-state='error'] .preview-emblem { color: var(--coral); background: var(--coral-tint); }
+.player-placeholder[data-state='empty'] .preview-emblem { color: var(--muted); background: var(--fill-control); }
+@media (min-width: 1024px) {
+  .precision-layout #view-replay.focus-replay[data-chrome-overlay='false'] .replay-control-panel {
+    background: var(--glass-strong); border-color: var(--glass-edge); box-shadow: var(--glass-shadow);
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  }
+}
+@media (max-width: 1023px) {
+  .precision-layout .mobile-nav {
+    background: var(--glass-strong); border-top: 1px solid var(--glass-highlight);
+    box-shadow: none; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  }
+  .precision-layout .mobile-nav button.active { box-shadow: none; }
+}
+.precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) .replay-topbar,
+.precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) .replay-control-panel {
+  background: var(--material-scrim); border-color: var(--glass-highlight);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+.precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) .player-placeholder {
+  justify-content: flex-start; background: transparent;
+  padding-top: calc(max(var(--space-2), var(--safe-top)) + var(--status-bar-blur-gap) + 64px);
+}
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 568px) and (max-width: 1023px) {
+  .precision-layout #view-replay.focus-replay .replay-topbar,
+  .precision-layout #view-replay.focus-replay .replay-control-panel {
+    background: var(--material-scrim); border-color: var(--glass-highlight);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .precision-layout #view-replay.focus-replay .player-placeholder {
+    justify-content: flex-start; background: transparent;
+    padding-top: calc(max(var(--space-2), var(--safe-top)) + var(--status-bar-blur-gap) + 64px);
+  }
+  .precision-layout #view-replay.focus-replay .video-status {
+    top: calc(max(var(--space-2), var(--safe-top)) + var(--status-bar-blur-gap) + 56px);
+    left: max(var(--space-3), var(--safe-left));
+  }
+  .console-app .app-dialog {
+    width: min(640px, calc(100% - max(16px, var(--safe-left)) - max(16px, var(--safe-right))));
+    max-height: calc(min(var(--app-viewport-height), var(--dialog-viewport-height, var(--app-viewport-height))) - max(12px, var(--safe-top)) - max(12px, var(--safe-bottom)));
+    margin-top: max(8px, var(--safe-top)); margin-bottom: max(8px, var(--safe-bottom));
+  }
+  .console-app .app-dialog:has(.calendar-control) {
+    position: fixed; display: flex; flex-direction: column; overflow: hidden;
+    top: max(var(--space-2), var(--safe-top)); right: max(var(--space-3), var(--safe-right)); bottom: auto; left: max(var(--space-3), var(--safe-left));
+    width: auto; max-width: none; margin: 0;
+    height: calc(min(var(--app-viewport-height), var(--dialog-viewport-height, var(--app-viewport-height))) - max(var(--space-2), var(--safe-top)) - max(var(--space-2), var(--safe-bottom)));
+    max-height: calc(min(var(--app-viewport-height), var(--dialog-viewport-height, var(--app-viewport-height))) - max(var(--space-2), var(--safe-top)) - max(var(--space-2), var(--safe-bottom)));
+  }
+  .console-app .app-dialog:has(.calendar-control) > .dialog-body {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden;
+  }
+  .console-app .calendar-control {
+    display: grid; flex: 1 1 auto; grid-template-columns: minmax(148px, 200px) minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr); align-items: start;
+    gap: var(--space-2) var(--space-3); min-height: 0;
+  }
+  .console-app .calendar-control > .field { grid-column: 1; grid-row: 1; }
+  .console-app .calendar-control > .calendar-heading { grid-column: 2; grid-row: 1; margin: 0; }
+  .console-app .calendar-control > .quiet-button { grid-column: 1; grid-row: 2; }
+  .console-app .calendar-control > .calendar-weekdays { grid-column: 2; grid-row: 2; }
+  .console-app .calendar-control > .calendar-grid { grid-column: 2; grid-row: 3; min-height: 0; overflow-y: auto; align-content: start; }
+  .console-app .calendar-control > .dialog-error { grid-column: 1; grid-row: 3; }
+  .console-app .calendar-day { min-height: var(--control); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .precision-layout .side-nav,
+  .precision-layout .mobile-nav,
+  .precision-layout #view-replay.focus-replay[data-chrome-overlay='false'] .replay-control-panel,
+  .console-app .app-dialog,
+  .precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) :is(.replay-topbar,.replay-control-panel) { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 568px) and (max-width: 1023px) and (prefers-reduced-transparency: reduce) {
+  .precision-layout #view-replay.focus-replay .replay-control-panel { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-placeholder[data-state='loading'] .preview-emblem { animation: none; }
 }

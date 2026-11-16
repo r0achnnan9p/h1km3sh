@@ -981,3 +981,62 @@ test('signed results pause in the background and retain the focused file when it
   await sleep(100);
   assert.equal(requests, 3, 'terminal results must not restart polling');
 });
+
+test('iPhone 14 Pro Max replay keeps the export cue, safe landscape chrome and a reachable date sheet', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const b = await setup(t);
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 430, height: 932, deviceScaleFactor: 1, mobile: true });
+  await b.evaluate(`document.documentElement.style.setProperty('--safe-top','59px');document.documentElement.style.setProperty('--safe-bottom','34px');`);
+  const portrait = await b.evaluate(`(() => {
+    const help = document.getElementById('selection-help');
+    const button = document.getElementById('export-range');
+    const doc = document.documentElement;
+    return { help: help.textContent, hidden: help.hidden, disabled: button.disabled,
+      overflow: doc.scrollWidth > doc.clientWidth + 1,
+      cueColor: getComputedStyle(button).backgroundColor };
+  })()`);
+  assert.equal(portrait.help, '先标记入点，再标记出点。');
+  assert.equal(portrait.hidden, false);
+  assert.equal(portrait.disabled, true);
+  assert.equal(portrait.overflow, false, '竖屏不能横向溢出');
+  assert.notEqual(portrait.cueColor, 'rgba(0, 0, 0, 0)');
+
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 932, height: 430, deviceScaleFactor: 1, mobile: true });
+  await b.evaluate(`const root=document.documentElement; root.style.setProperty('--safe-top','0px'); root.style.setProperty('--safe-bottom','21px'); root.style.setProperty('--safe-left','59px'); root.style.setProperty('--safe-right','59px');`);
+  await sleep(200);
+  const landscape = await b.evaluate(`(() => {
+    const title = document.getElementById('preview-state-title').getBoundingClientRect();
+    const panel = document.getElementById('replay-control-panel').getBoundingClientRect();
+    const filter = getComputedStyle(document.getElementById('replay-control-panel')).backdropFilter;
+    return { titleBottom: title.bottom, panelTop: panel.top, filter, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 };
+  })()`);
+  assert.ok(landscape.titleBottom <= landscape.panelTop + 1, `横屏状态应留在控制面上方 ${landscape.titleBottom} <= ${landscape.panelTop}`);
+  assert.equal(landscape.filter, 'none', '画面上的控制面不能模糊');
+  assert.equal(landscape.overflow, false, '横屏不能横向溢出');
+
+  await tap(b, { x: 466, y: 40 });
+  await sleep(300);
+  await b.evaluate(`document.getElementById('playback-context').click()`);
+  await sleep(300);
+  const sheet = await b.evaluate(`(() => {
+    const dialog = document.querySelector('dialog[open]');
+    const box = dialog.getBoundingClientRect();
+    const grid = dialog.querySelector('.calendar-grid');
+    const day = [...dialog.querySelectorAll('.calendar-day')].find(node => node.textContent === '28');
+    day.scrollIntoView({ block: 'nearest' });
+    const today = [...dialog.querySelectorAll('button')].find(node => node.textContent === '今天');
+    const dayBox = day.getBoundingClientRect();
+    const todayBox = today.getBoundingClientRect();
+    return {
+      left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+      dayTop: dayBox.top, dayBottom: dayBox.bottom, dayHeight: dayBox.height,
+      todayTop: todayBox.top, todayBottom: todayBox.bottom, todayHeight: todayBox.height,
+      gridScroll: grid.scrollHeight > grid.clientHeight
+    };
+  })()`);
+  assert.ok(sheet.left >= 59 - 1 && sheet.right <= 932 - 59 + 1, `日期弹层让出横屏刘海 ${JSON.stringify(sheet)}`);
+  assert.ok(sheet.top >= -1 && sheet.bottom <= 430 - 21 + 1, `日期弹层让出主屏指示条 ${JSON.stringify(sheet)}`);
+  assert.ok(sheet.dayHeight >= 44 && sheet.dayTop >= sheet.top - 1 && sheet.dayBottom <= sheet.bottom + 1, '月末日期可以滚进弹层');
+  assert.ok(sheet.todayHeight >= 44 && sheet.todayTop >= sheet.top - 1 && sheet.todayBottom <= sheet.bottom + 1, '今天按钮保持可点');
+  await b.evaluate(`document.querySelector('dialog[open] .dialog-close').click()`);
+  assert.equal(await b.evaluate(`document.getElementById('selection-help').textContent`), '先标记入点，再标记出点。');
+});

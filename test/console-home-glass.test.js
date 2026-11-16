@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const css = fs.readFileSync(new URL('../public/console.css', import.meta.url), 'utf8');
+const script = fs.readFileSync(new URL('../public/console.js', import.meta.url), 'utf8');
+
+test('选段提示只在还不能导出时出现，并区分缺哪一端', () => {
+  const body = script.slice(script.indexOf('function replaySelectionCue('), script.indexOf('const cue = replaySelectionCue'));
+  const context = {};
+  vm.runInContext(`${body}\nglobalThis.replaySelectionCue = replaySelectionCue;`, vm.createContext(context));
+  const cue = (input) => context.replaySelectionCue(input);
+  const expectCue = (input, text, tone) => { const got = cue(input); assert.equal(got.text, text); assert.equal(got.tone, tone); };
+  expectCue({}, '先标记入点，再标记出点。', '');
+  expectCue({ needsChannel: true, inMs: 1, outMs: 2 }, '先选择录像机和通道。', '');
+  expectCue({ outMs: 2_000 }, '再标记入点即可导出。', '');
+  expectCue({ inMs: 1_000 }, '再标记出点即可导出。', '');
+  expectCue({ inMs: 5_000, outMs: 5_000 }, '出点需要晚于入点。', 'warning');
+  expectCue({ inMs: 1_000, outMs: 2_000 }, '', 'ready');
+});
+
+test('画面占位状态沿用现有标题，不另造一套文案', () => {
+  const body = script.slice(script.indexOf('function updatePreviewPlaceholder('), script.indexOf('function segmentBounds('));
+  const nodes = new Map();
+  const $ = id => { if (!nodes.has(id)) nodes.set(id, { textContent: '', dataset: {} }); return nodes.get(id); };
+  const context = { $, globalThis: {} };
+  vm.runInContext(`${body}\nglobalThis.updatePreviewPlaceholder = updatePreviewPlaceholder;`, vm.createContext(context));
+  const paint = title => { context.updatePreviewPlaceholder(title, ''); return $('player-placeholder').dataset.state; };
+  assert.equal(paint('正在查询录像'), 'loading');
+  assert.equal(paint('录像列表读取失败'), 'error');
+  assert.equal(paint('这一天没有录像'), 'empty');
+  assert.equal(paint('尚未发现镜头'), 'empty');
+  assert.equal(paint('录像已就绪'), 'ready');
+});
+
+test('浮在画面上的回放控制使用遮罩且不模糊，日期弹层让出安全区', () => {
+  assert.match(css, /--material-scrim:\s*rgba\(11,17,24,\.92\)/);
+  assert.match(css, /--glass-strong:\s*rgba\(15,22,30,\.94\)/);
+  const header = '@media (orientation: landscape) and (max-height: 540px) and (min-width: 568px) and (max-width: 1023px) {';
+  const landscape = css.slice(css.lastIndexOf(header));
+  const block = landscape.slice(0, landscape.indexOf('\n@media'));
+  assert.match(block, /\.replay-control-panel \{[^}]*background: var\(--material-scrim\)[^}]*backdrop-filter: none/);
+  assert.match(block, /\.player-placeholder \{[^}]*justify-content: flex-start/);
+  assert.match(block, /\.app-dialog \{[^}]*var\(--safe-left\)[^}]*var\(--safe-bottom\)/);
+  assert.match(block, /\.app-dialog:has\(\.calendar-control\) \{[^}]*var\(--safe-left\)/);
+  assert.match(block, /\.calendar-grid \{[^}]*overflow-y: auto/);
+  assert.match(css, /#export-range:disabled:not\(\[aria-busy='true'\]\)/);
+  assert.match(css, /prefers-reduced-transparency: reduce\)[\s\S]*background: var\(--surface\)/);
+});
