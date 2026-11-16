@@ -48,3 +48,17 @@ test('浮在画面上的回放控制使用遮罩且不模糊，日期弹层让�
   assert.match(css, /#export-range:disabled:not\(\[aria-busy='true'\]\)/);
   assert.match(css, /prefers-reduced-transparency: reduce\)[\s\S]*background: var\(--surface\)/);
 });
+
+test('动效集中在 token，时间尺不被动效拖慢，减少动效时停掉位移和循环', () => {
+  assert.match(css, /--motion-distance:\s*6px/);
+  assert.match(css, /--motion-press:\s*\.97/);
+  assert.match(css, /--ease-release:\s*cubic-bezier\(\.16,1\.04,\.32,1\)/);
+  assert.match(css, /button:not\(:disabled\):active \{ transform: scale\(var\(--motion-press\)\); \}/);
+  assert.match(css, /button:disabled \{ transform: none; \}/);
+  assert.doesNotMatch(css, /transition:\s*all\b/);
+  assert.match(css, /\.view\.active \{ animation: motion-view var\(--dur\) var\(--ease\) both; \}/);
+  assert.match(css, /\.app-dialog\[open\]::backdrop \{ animation: motion-fade var\(--dur\) var\(--ease\) both; \}/);
+  assert.match(css, /\.overview-cursor,\.overview-selection,\.time-cursor,\.range-overlay[^}]*transition: none; animation: none/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \*, \*::before, \*::after \{ animation: none !important; transition: none !important;/);
+  assert.match(css, /prefers-reduced-motion: reduce\) \{\s*\.player-placeholder\[data-state='loading'\] \.preview-emblem \{ animation: none; \}\s*button:not\(:disabled\):active \{ transform: none; \}/);
+});

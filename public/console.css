@@ -26,7 +26,8 @@
   --control-sm: 40px; --control: 44px; --control-lg: 56px; --radius-pill: 999px;
   --fill-control: rgba(255,255,255,.12); --fill-control-strong: rgba(255,255,255,.22);
   --warning-tint: rgba(255,210,122,.16); --coral-tint: rgba(255,157,138,.14); --coral-edge: rgba(255,157,138,.4);
-  --ease: cubic-bezier(.2,.8,.2,1); --dur-fast: 120ms; --dur: 200ms; --dur-slow: 320ms;
+  --ease: cubic-bezier(.2,.8,.2,1); --ease-release: cubic-bezier(.16,1.04,.32,1); --dur-fast: 120ms; --dur: 200ms; --dur-slow: 320ms;
+  --motion-distance: 6px; --motion-press: .97;
   --z-nav: 40; --z-sheet: 60; --z-toast: 80; --z-hud: 100; --rail: var(--sidebar); --side-panel: clamp(320px,22vw,420px);
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
@@ -40,8 +41,9 @@ button, input, select { min-width: 0; font: inherit; }
 button { color: inherit; cursor: pointer; touch-action: manipulation; }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button, input, select, a { -webkit-tap-highlight-color: transparent; }
-button:not(:disabled) { transition: background .15s, border-color .15s, box-shadow .15s; }
-button:not(:disabled):active { filter: brightness(.96); }
+button:not(:disabled) { transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-release); }
+button:not(:disabled):active { transform: scale(var(--motion-press)); }
+button:disabled { transform: none; }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 [hidden] { display: none !important; }
 a { color: inherit; }
@@ -179,7 +181,7 @@ h3 { font-size: 14px; font-weight: 600; }
 .selection-help { margin: 5px 0 17px; color: var(--muted); font-size: 11px; line-height: 1.75; }
 .selection-help.warning { color: var(--warning); }
 .range-controls .primary-button { width: 100%; justify-content: space-between; }
-.scrub-time-overlay { position: fixed; z-index: 60; pointer-events: none; left: 50%; top: 24%; display: grid; gap: 7px; justify-items: center; transform: translate(-50%, -8px); max-width: calc(100% - 28px); padding: 18px 25px; border-radius: var(--radius-tile); background: var(--surface); color: white; opacity: 0; transition: opacity .12s, transform .12s; box-shadow: var(--glass-shadow); }
+.scrub-time-overlay { position: fixed; z-index: 60; pointer-events: none; left: 50%; top: 24%; display: grid; gap: 7px; justify-items: center; transform: translate(-50%, -8px); max-width: calc(100% - 28px); padding: 18px 25px; border-radius: var(--radius-tile); background: var(--surface); color: white; opacity: 0; transition: opacity var(--dur-fast) var(--ease); box-shadow: var(--glass-shadow); }
 .scrub-time-overlay.visible { opacity: 1; transform: translate(-50%, 0); }
 .scrub-time-value { font: 26px var(--mono); letter-spacing: -.6px; }
 .scrub-date-value { color: var(--muted); font-size: 11px; }
@@ -373,7 +375,7 @@ button.settings-item:hover:not(:disabled) { background: rgba(255,255,255,.06); }
 .console-app .boundary-steps button { padding-inline: 4px; font-size: 12px; }
 .gap-intervals { max-height: 160px; overflow: auto; font: 12px/1.8 var(--mono); color: var(--muted); }
 .gap-intervals p { margin-bottom: 8px; overflow-wrap: anywhere; }
-.toast { position: fixed; z-index: 100; left: 50%; bottom: calc(25px + var(--safe-bottom)); width: max-content; max-width: min(520px, calc(100% - 32px)); padding: 12px 18px; border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--bg); color: white; font-size: 12px; line-height: 1.6; box-shadow: var(--glass-shadow); opacity: 0; pointer-events: none; transform: translate(-50%, 10px); transition: opacity .15s, transform .15s; }
+.toast { position: fixed; z-index: 100; left: 50%; bottom: calc(25px + var(--safe-bottom)); width: max-content; max-width: min(520px, calc(100% - 32px)); padding: 12px 18px; border: 1px solid var(--line); border-radius: var(--radius-tile); background: var(--bg); color: white; font-size: 12px; line-height: 1.6; box-shadow: var(--glass-shadow); opacity: 0; pointer-events: none; transform: translate(-50%, var(--motion-distance)); transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-release); }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.error { background: var(--coral); }
 /* Mid-size screens preserve usable video and selection widths. */
@@ -1565,4 +1567,20 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
 }
 @media (prefers-reduced-motion: reduce) {
   .player-placeholder[data-state='loading'] .preview-emblem { animation: none; }
+  button:not(:disabled):active { transform: none; }
+}
+
+/* Shared motion. Timeline scrubbing stays instant; reduced motion keeps the global animation/transition kill switch. */
+@keyframes motion-enter { from { opacity: 0; transform: translateY(calc(var(--motion-distance) * -1)); } to { opacity: 1; transform: none; } }
+@keyframes motion-view { from { opacity: 0; } to { opacity: 1; } }
+@keyframes motion-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes motion-confirm { from { opacity: .72; } to { opacity: 1; } }
+.precision-layout .view.active { animation: motion-view var(--dur) var(--ease) both; }
+.console-app .app-dialog[open] { animation: motion-enter var(--dur) var(--ease) both; }
+.console-app .app-dialog[open]::backdrop { animation: motion-fade var(--dur) var(--ease) both; }
+.precision-layout #view-replay.focus-replay .replay-selection-editor[data-selection='ready'] #export-range:not(:disabled):not([aria-busy='true']) { animation: motion-confirm var(--dur-fast) var(--ease); }
+.precision-layout #view-replay.focus-replay #export-range[aria-busy='true'],
+.precision-layout #view-replay.focus-replay #export-range.submitted { animation: motion-confirm var(--dur) var(--ease); }
+.precision-layout #view-replay.focus-replay :is(.overview-cursor,.overview-selection,.time-cursor,.range-overlay,.overview-segment,.overview-gap,.overview-outside,.overview-window) {
+  transition: none; animation: none;
 }
