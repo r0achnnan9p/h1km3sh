@@ -7,21 +7,20 @@
   --status-bar-blur-gap: 0px;
   color-scheme: dark;
   --app-background: var(--bg);
-  /* 午夜霜玻璃：深色画布、冷色细描边、白色主操作。状态色仍分开。 */
-  --bg: #070b12; --surface: #101722; --surface2: #182230;
-  --text: #f4f7fb; --muted: #b7c3d1; --dim: #8e9aab;
-  --line: rgba(214,226,240,.16); --accent: #f4f7fb; --on-accent: #10151c; --tint: rgba(244,247,251,.14);
-  --cta: #f7f9fc; --on-cta: #10151c;
+  /* 午夜霜玻璃方向一。钢色面板抬升，霜玻璃只用于工具层。 */
+  --bg: #05060f; --surface: #2f343e; --surface2: #3a414c;
+  --text: #d1e4fa; --muted: #c7d3ea; --dim: #9da7ba;
+  --line: rgba(186,215,247,.16); --accent: #ffffff; --on-accent: #10151c; --tint: rgba(186,214,247,.14);
+  --cta: #ffffff; --on-cta: #10151c;
   --green: #89d9a8; --green-tint: rgba(137,217,168,.14); --coral: #ff9d8a; --warning: #ffd27a;
   --cyan: var(--accent);
-  /* 工具层可以透。盖住画面的控件只用高不透明度遮罩，不对录像做模糊。 */
-  --glass: rgba(16,24,36,.74); --glass-strong: rgba(8,12,20,.94); --glass-light: rgba(22,32,46,.88);
-  --glass-edge: rgba(214,226,240,.22); --glass-highlight: rgba(236,244,252,.42);
-  --glass-blur: blur(22px); --glass-prompt-blur: blur(18px);
-  --glass-shadow: 0 10px 28px rgba(0,0,0,.28); --glass-prompt-shadow: 0 18px 48px rgba(0,0,0,.42);
-  --material-scrim: rgba(7,11,18,.92);
-  --workspace-wash: radial-gradient(90% 55% at 50% -12%, rgba(186,206,230,.08), transparent 46%), var(--bg);
-  --radius-panel: 18px; --radius-video: 16px; --radius-nav: 14px; --radius-transport: 16px; --radius-button: 12px; --radius-toast: 24px; --radius-tile: 10px;
+  --glass: rgba(186,214,247,.12); --glass-strong: rgba(186,214,247,.14); --glass-light: rgba(186,214,247,.08);
+  --glass-edge: rgba(186,215,247,.18); --glass-highlight: rgba(186,215,247,.20);
+  --glass-blur: blur(18px); --glass-prompt-blur: blur(18px);
+  --glass-shadow: 0 12px 32px rgba(0,0,0,.35); --glass-prompt-shadow: 0 18px 48px rgba(0,0,0,.45);
+  --material-scrim: rgba(5,6,15,.88);
+  --workspace-wash: var(--bg);
+  --radius-panel: 18px; --radius-shell: 28px; --radius-video: 20px; --radius-nav: 14px; --radius-transport: 16px; --radius-button: 12px; --radius-toast: 24px; --radius-tile: 10px;
   --recording-band: rgba(137,217,168,.65); --recording-edge: #89d9a8;
   --radius: var(--radius-panel); --sidebar: 160px; --radius-card: 16px; --radius-field: 12px; --fill-well: rgba(0,0,0,.28);
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-7: 32px; --space-8: 48px;
@@ -1382,8 +1381,11 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
   .precision-layout #view-replay.focus-replay .replay-actions > #export-range { min-width:112px; }
 }
 @media (min-width:400px) and (max-width:539px) and (orientation:portrait) {
-  .precision-layout #view-replay.focus-replay .playback-quick-controls { grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr); }
-  .precision-layout #view-replay.focus-replay .replay-date-controls { grid-column:1/-1; }
+  .precision-layout #view-replay.focus-replay .playback-quick-controls { grid-template-columns:minmax(0,1fr) minmax(0,1.05fr) auto; }
+  .precision-layout #view-replay.focus-replay .playback-quick-controls select { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .precision-layout #view-replay.focus-replay .replay-date-controls { grid-column:auto; width:auto; max-width:100%; min-width:0; }
+  .precision-layout #view-replay.focus-replay .replay-date-controls > #playback-context { min-width:0; }
+  .precision-layout #view-replay.focus-replay #playback-context-date { overflow:hidden; text-overflow:ellipsis; max-width:9em; }
 }
 /* Very narrow screens give every media action and window its full hit area. */
 @media (max-width:374px) {
@@ -1592,6 +1594,10 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
 .precision-layout .side-nav,
 .precision-layout .mobile-nav,
 .console-app .app-dialog { border-color: var(--glass-edge); }
+.console-app .app-dialog { background: var(--surface); }
+@media (max-width: 1023px) {
+  .precision-layout .mobile-nav { background: var(--surface); border-top: 1px solid var(--glass-edge); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
 
 /* Shared motion. Timeline scrubbing stays instant; reduced motion keeps the global animation/transition kill switch. */
 @keyframes motion-enter { from { opacity: 0; transform: translateY(calc(var(--motion-distance) * -1)); } to { opacity: 1; transform: none; } }
@@ -1606,4 +1612,35 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
 .precision-layout #view-replay.focus-replay #export-range.submitted { animation: motion-confirm var(--dur) var(--ease); }
 .precision-layout #view-replay.focus-replay :is(.overview-cursor,.overview-selection,.time-cursor,.range-overlay,.overview-segment,.overview-gap,.overview-outside,.overview-window) {
   transition: none; animation: none;
+}
+
+/* 桌面把侧栏改成顶栏，播放条叠在画面底部，时间尺和白色导出留在画面下方。手机竖屏仍把控制面放在画面下面。 */
+@media (min-width: 1024px) {
+  .precision-layout .console-shell {
+    display: flex; flex-direction: column; height: var(--app-viewport-height); min-height: 0;
+    padding: max(16px, var(--safe-top)) max(20px, var(--safe-right)) max(16px, var(--safe-bottom)) max(20px, var(--safe-left));
+    gap: 12px;
+  }
+  .precision-layout .side-nav {
+    position: relative; inset: auto; flex: none; flex-direction: row; align-items: center;
+    width: auto; height: auto; margin: 0; padding: 6px 8px 6px 14px; gap: 4px;
+    border: 1px solid var(--glass-edge); border-radius: var(--radius-pill);
+    background: var(--glass); box-shadow: none;
+    -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  }
+  .precision-layout .side-nav .workspace-brand { flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; min-height: 44px; margin: 0 12px 0 0; padding: 0; }
+  .precision-layout .side-nav .workspace-brand strong { font: 600 16px/1 var(--font); letter-spacing: -.3px; }
+  .precision-layout .side-nav .nav-item { width: auto; min-height: 44px; padding: 0 16px; border-radius: var(--radius-pill); justify-content: center; }
+  .precision-layout .side-nav .nav-item.active { background: var(--fill-control-strong); color: var(--text); }
+  .precision-layout .workspace-main {
+    margin-left: 0; flex: 1; min-height: 0; height: auto;
+    border: 1px solid var(--glass-edge); border-radius: var(--radius-shell); background: var(--surface); overflow: hidden;
+  }
+  body.precision-layout[data-view='replay'] .views { padding: 16px 20px 12px; }
+  .precision-layout #view-replay.focus-replay[data-chrome-overlay='false'] .replay-control-panel { margin-top: -68px; position: relative; z-index: 4; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; border: 0; }
+  .precision-layout #view-replay.focus-replay .replay-toolbar {
+    margin: 0 28px 10px; padding: 4px 8px; min-height: 52px;
+    border: 1px solid var(--glass-edge); border-radius: var(--radius-pill); background: var(--material-scrim);
+  }
+  .precision-layout #view-replay.focus-replay .timeline-section { padding-top: 4px; }
 }

@@ -35,9 +35,9 @@ test('画面占位状态沿用现有标题，不另造一套文案', () => {
 });
 
 test('浮在画面上的回放控制使用遮罩且不模糊，日期弹层让出安全区', () => {
-  assert.match(css, /--material-scrim:\s*rgba\(7,11,18,\.92\)/);
-  assert.match(css, /--glass-strong:\s*rgba\(8,12,20,\.94\)/);
-  assert.match(css, /--cta:\s*#f7f9fc/);
+  assert.match(css, /--material-scrim:\s*rgba\(5,6,15,\.88\)/);
+  assert.match(css, /--glass:\s*rgba\(186,214,247,\.12\)/);
+  assert.match(css, /--cta:\s*#ffffff/);
   assert.match(css, /#export-range \{[^}]*background:var\(--cta\); border-radius:var\(--radius-pill\)/);
   const header = '@media (orientation: landscape) and (max-height: 540px) and (min-width: 568px) and (max-width: 1023px) {';
   const landscape = css.slice(css.lastIndexOf(header));
