@@ -7,18 +7,20 @@
   --status-bar-blur-gap: 0px;
   color-scheme: dark;
   --app-background: var(--bg);
-  --bg: #0b1118; --surface: #151e28; --surface2: #202e3b;
-  --text: #edf4f7; --muted: #b0c1cc; --dim: #9badbb;
-  --line: rgba(255,255,255,.16); --accent: #81e5e0; --on-accent: #072926; --tint: rgba(129,229,224,.14);
+  /* 午夜霜玻璃：深色画布、冷色细描边、白色主操作。状态色仍分开。 */
+  --bg: #070b12; --surface: #101722; --surface2: #182230;
+  --text: #f4f7fb; --muted: #b7c3d1; --dim: #8e9aab;
+  --line: rgba(214,226,240,.16); --accent: #f4f7fb; --on-accent: #10151c; --tint: rgba(244,247,251,.14);
+  --cta: #f7f9fc; --on-cta: #10151c;
   --green: #89d9a8; --green-tint: rgba(137,217,168,.14); --coral: #ff9d8a; --warning: #ffd27a;
   --cyan: var(--accent);
-  /* Glass is for static chrome. Anything painted over moving video uses --material-scrim and no blur. */
-  --glass: rgba(21,30,40,.78); --glass-strong: rgba(15,22,30,.94); --glass-light: rgba(32,46,59,.88);
-  --glass-edge: rgba(255,255,255,.22); --glass-highlight: rgba(255,255,255,.34);
+  /* 工具层可以透。盖住画面的控件只用高不透明度遮罩，不对录像做模糊。 */
+  --glass: rgba(16,24,36,.74); --glass-strong: rgba(8,12,20,.94); --glass-light: rgba(22,32,46,.88);
+  --glass-edge: rgba(214,226,240,.22); --glass-highlight: rgba(236,244,252,.42);
   --glass-blur: blur(22px); --glass-prompt-blur: blur(18px);
   --glass-shadow: 0 10px 28px rgba(0,0,0,.28); --glass-prompt-shadow: 0 18px 48px rgba(0,0,0,.42);
-  --material-scrim: rgba(11,17,24,.92);
-  --workspace-wash: radial-gradient(120% 70% at 0% -10%, var(--tint), transparent 46%), var(--bg);
+  --material-scrim: rgba(7,11,18,.92);
+  --workspace-wash: radial-gradient(90% 55% at 50% -12%, rgba(186,206,230,.08), transparent 46%), var(--bg);
   --radius-panel: 18px; --radius-video: 16px; --radius-nav: 14px; --radius-transport: 16px; --radius-button: 12px; --radius-toast: 24px; --radius-tile: 10px;
   --recording-band: rgba(137,217,168,.65); --recording-edge: #89d9a8;
   --radius: var(--radius-panel); --sidebar: 160px; --radius-card: 16px; --radius-field: 12px; --fill-well: rgba(0,0,0,.28);
@@ -1316,7 +1318,7 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay .replay-actions > button svg { width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .precision-layout #view-replay.focus-replay #clear-marks,
 .precision-layout #view-replay.focus-replay #cancel-export { order:0; background:transparent; color:var(--muted); }
-.precision-layout #view-replay.focus-replay .replay-actions > #export-range { order:0; width:auto; min-width:100px; height:var(--control); min-height:var(--control); padding:var(--space-2) var(--space-4); color:var(--on-accent); background:var(--accent); }
+.precision-layout #view-replay.focus-replay .replay-actions > #export-range { order:0; width:auto; min-width:100px; height:var(--control); min-height:var(--control); padding:var(--space-2) var(--space-4); color:var(--on-cta); background:var(--cta); border-radius:var(--radius-pill); }
 .precision-layout #view-replay.focus-replay .replay-actions > #export-range.submitted { background:var(--green); }
 .precision-layout #view-replay.focus-replay .selection-help { grid-column:1/-1; grid-row:auto; margin:0; font-size:13px; }
 .precision-layout #view-replay.focus-replay .selection-help.warning::before { content:none; }
@@ -1486,7 +1488,7 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
   opacity: 1; color: var(--muted); background: var(--fill-control);
 }
 .precision-layout #view-replay.focus-replay .replay-actions > #export-range[aria-busy='true'] {
-  opacity: 1; color: var(--on-accent); background: var(--accent);
+  opacity: 1; color: var(--on-cta); background: var(--cta);
 }
 .player-placeholder[data-state='loading'] .preview-emblem { animation: spin .8s linear infinite; }
 .player-placeholder[data-state='error'] .preview-emblem { color: var(--coral); background: var(--coral-tint); }
@@ -1572,6 +1574,24 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
   .player-placeholder[data-state='loading'] .preview-emblem { animation: none; }
   button:not(:disabled):active { transform: none; }
 }
+
+/* 午夜霜玻璃工具层：来源和日期是冷色描边芯片，播放键是霜面，导出才是白色胶囊。 */
+.precision-layout #view-replay.focus-replay .playback-quick-controls select,
+.precision-layout #view-replay.focus-replay .replay-date-controls,
+.precision-layout #view-replay.focus-replay .timeline-window-switch,
+.precision-layout #view-replay.focus-replay .mark-field {
+  border-color: var(--glass-edge); background: var(--glass-light);
+}
+.precision-layout #view-replay.focus-replay .playback-quick-controls select,
+.precision-layout #view-replay.focus-replay .replay-date-controls { border-radius: var(--radius-pill); }
+.precision-layout #view-replay.focus-replay #transport-toggle { background: var(--fill-control-strong); color: var(--text); }
+.precision-layout #view-replay.focus-replay .mark-field:has(.active) { border-color: var(--accent); background: var(--tint); }
+@media (hover:hover) and (pointer:fine) {
+  .precision-layout #view-replay.focus-replay #transport-toggle:hover:not(:disabled) { background: var(--fill-control-strong); }
+}
+.precision-layout .side-nav,
+.precision-layout .mobile-nav,
+.console-app .app-dialog { border-color: var(--glass-edge); }
 
 /* Shared motion. Timeline scrubbing stays instant; reduced motion keeps the global animation/transition kill switch. */
 @keyframes motion-enter { from { opacity: 0; transform: translateY(calc(var(--motion-distance) * -1)); } to { opacity: 1; transform: none; } }
