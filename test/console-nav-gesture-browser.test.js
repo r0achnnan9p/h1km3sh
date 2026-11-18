@@ -505,7 +505,9 @@ test('standalone viewport geometry remains visible during resize and stable duri
   await b.evaluate(`document.querySelector('.mobile-nav button[data-view="replay"]').click()`); await sleep(100);
   assert.equal(await b.evaluate(`document.documentElement.classList.contains('standalone-viewport')`),true,'narrow landscape also follows visible nav bounds');
   await device(430,932);
-  await b.send('Runtime.evaluate',{expression:`document.getElementById('replay-fullscreen').click()`,userGesture:true,awaitPromise:true});
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(50);
+  await b.send('Runtime.evaluate',{expression:`document.getElementById('replay-system-fullscreen').click()`,userGesture:true,awaitPromise:true});
   await sleep(100);
   for(let i=0;i<40 && !await b.evaluate(`!!document.fullscreenElement`);i++) await sleep(50);
   assert.equal(await b.evaluate(`!!document.fullscreenElement`),true,'browser really entered fullscreen');
@@ -1154,4 +1156,134 @@ test('short desktop settings scroll to the cover save control and the top nav ho
   const glass = await b.evaluate(`(() => { const nav = getComputedStyle(document.querySelector('.side-nav')); return { background: nav.backgroundColor, filter: nav.backdropFilter || nav.webkitBackdropFilter }; })()`);
   assert.equal(glass.background, 'rgba(186, 214, 247, 0.12)');
   assert.match(glass.filter, /blur/);
+});
+
+test('css fullscreen grows the same player back to its place without fading the page', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const res = createResources(); t.after(() => res.closeAll());
+  const server = await startFixture(res), b = await launch(res);
+  await b.send('Page.enable'); await b.send('Runtime.enable');
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal#replay` });
+  for (let i = 0; i < 100 && !await b.evaluate(`document.getElementById('preview-state-title')?.textContent && document.getElementById('preview-state-title').textContent !== '尚未载入画面'`); i++) await sleep(100);
+  await sleep(300);
+  const before = await b.evaluate(`(() => { const video=document.getElementById('replay-player'); return { paused: video.paused, time: video.currentTime }; })()`);
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(40);
+  const during = await b.evaluate(`(() => {
+    const view=document.getElementById('view-replay');
+    const frame=document.getElementById('player-wrap');
+    const video=document.getElementById('replay-player');
+    return { expanded: view.classList.contains('replay-expanded') || document.fullscreenElement === view, same: video.id === 'replay-player', paused: video.paused, time: video.currentTime, pageFade: view.getAnimations().some(item => item.animationName === 'motion-view' && item.playState === 'running') };
+  })()`);
+  assert.equal(during.expanded, true);
+  assert.equal(during.same, true);
+  assert.equal(during.paused, before.paused);
+  assert.equal(during.time, before.time);
+  assert.equal(during.pageFade, false);
+  await sleep(360);
+  const settled = await b.evaluate(`(() => { const frame=document.getElementById('player-wrap'); const view=document.getElementById('view-replay'); return { transform: getComputedStyle(frame).transform, running: frame.getAnimations().some(item => item.playState === 'running'), expanded: view.classList.contains('replay-expanded') || document.fullscreenElement === view }; })()`);
+  assert.equal(settled.expanded, true);
+  assert.equal(settled.running, false);
+  assert.equal(settled.transform, 'none');
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(360);
+  const back = await b.evaluate(`(() => { const view=document.getElementById('view-replay'); const video=document.getElementById('replay-player'); return { expanded: view.classList.contains('replay-expanded'), fullscreen: document.fullscreenElement === view, paused: video.paused, time: video.currentTime }; })()`);
+  assert.equal(back.expanded, false);
+  assert.equal(back.fullscreen, false);
+  assert.equal(back.paused, before.paused);
+  assert.equal(back.time, before.time);
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await sleep(50);
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(40);
+  const reduced = await b.evaluate(`({ matches: matchMedia('(prefers-reduced-motion: reduce)').matches, animations: document.getElementById('player-wrap').getAnimations().length })`);
+  assert.equal(reduced.matches, true);
+  assert.equal(reduced.animations, 0);
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+});
+
+test('portrait immersion morphs both edges and keeps the picture contained', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const res = createResources(); t.after(() => res.closeAll());
+  const server = await startFixture(res), b = await launch(res);
+  await b.send('Page.enable'); await b.send('Runtime.enable');
+  const containBox = (box) => {
+    const aspect = 16 / 9;
+    const boxAspect = box.w / box.h;
+    if (boxAspect > aspect) { const h = box.h, w = h * aspect; return { w, h }; }
+    const w = box.w, h = w / aspect; return { w, h };
+  };
+  const check = async (width, height) => {
+    await b.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 800 });
+    await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal&safeArea=${height > width ? 'iphone' : width > height ? 'landscape' : 'none'}#replay` });
+    for (let i = 0; i < 80 && !await b.evaluate(`document.getElementById('preview-state-title')?.textContent !== '尚未载入画面'`); i++) await sleep(100);
+    if (width > height && height <= 540) {
+      await b.evaluate(`document.getElementById('player-wrap').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:1,pointerType:'touch',isPrimary:true,clientX:80,clientY:40}))`);
+      await sleep(200);
+    }
+    const sample = await b.evaluate(`(() => {
+      const frame = document.getElementById('player-wrap');
+      const video = document.getElementById('replay-player');
+      const before = frame.getBoundingClientRect();
+      const state = { paused: video.paused, time: video.currentTime, id: video.id };
+      document.getElementById('replay-fullscreen').click();
+      const anim = frame.getAnimations().find(item => item.playState === 'running');
+      if (!anim) return { state, before: { w: before.width, h: before.height }, running: false };
+      anim.pause();
+      anim.currentTime = 0;
+      const first = frame.getBoundingClientRect();
+      anim.currentTime = 140;
+      const mid = frame.getBoundingClientRect();
+      anim.currentTime = 280;
+      const last = frame.getBoundingClientRect();
+      anim.play();
+      return { state, running: true, fit: getComputedStyle(video).objectFit, before: { w: before.width, h: before.height }, first: { w: first.width, h: first.height }, mid: { w: mid.width, h: mid.height }, last: { w: last.width, h: last.height } };
+    })()`);
+    if (!sample.running) {
+      assert.ok(Math.abs(sample.before.w - width) < 40 && Math.abs(sample.before.h - height) < 40, JSON.stringify(sample));
+      await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+      return sample;
+    }
+    assert.equal(sample.fit, 'contain');
+    assert.ok(Math.abs(sample.first.w - sample.before.w) < 3 && Math.abs(sample.first.h - sample.before.h) < 3, JSON.stringify(sample));
+    const picture = [sample.first, sample.mid, sample.last].map(containBox);
+    const pictureAspect = picture.map(box => box.w / box.h);
+    assert.ok(pictureAspect.every(aspect => Math.abs(aspect - 16 / 9) < 0.02), JSON.stringify(pictureAspect));
+    const growing = sample.last.h > sample.first.h + 30;
+    if (growing) assert.ok(sample.mid.h > sample.first.h + 10 && sample.mid.h < sample.last.h - 10, JSON.stringify(sample));
+    await sleep(360);
+    const back = await b.evaluate(`(() => {
+      const frame = document.getElementById('player-wrap');
+      const video = document.getElementById('replay-player');
+      const full = frame.getBoundingClientRect();
+      document.getElementById('replay-fullscreen').click();
+      const anim = frame.getAnimations().find(item => item.playState === 'running');
+      anim.pause(); anim.currentTime = 0; const first = frame.getBoundingClientRect();
+      anim.currentTime = 280; const last = frame.getBoundingClientRect();
+      return { full: { w: full.width, h: full.height }, first: { w: first.width, h: first.height }, last: { w: last.width, h: last.height }, paused: video.paused, time: video.currentTime, fit: getComputedStyle(video).objectFit };
+    })()`);
+    assert.ok(Math.abs(back.first.w - back.full.w) < 3 && Math.abs(back.first.h - back.full.h) < 3, JSON.stringify(back));
+    assert.ok(Math.abs(back.last.w - sample.before.w) <= Math.max(12, sample.before.w * 0.08) && Math.abs(back.last.h - sample.before.h) <= Math.max(12, sample.before.h * 0.08), JSON.stringify({ ...back, before: sample.before }));
+    assert.equal(back.fit, 'contain');
+    assert.equal(back.paused, sample.state.paused);
+    assert.equal(back.time, sample.state.time);
+    await sleep(40);
+    return sample;
+  };
+  await check(430, 932);
+  await check(932, 430);
+  await check(1440, 900);
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] });
+  await b.evaluate(`document.querySelector('.mobile-nav button[data-view="library"]').click()`);
+  await sleep(100);
+  const solid = await b.evaluate(`(() => {
+    const search = getComputedStyle(document.querySelector('.library-search input')).backgroundColor;
+    const probe = document.createElement('div'); probe.className = 'empty-card'; document.querySelector('#output-list').append(probe);
+    const empty = getComputedStyle(probe).backgroundColor; probe.remove();
+    document.querySelector('.mobile-nav button[data-view="tasks"]').click();
+    const tab = getComputedStyle(document.querySelector('.task-tabs')).backgroundColor;
+    const selected = getComputedStyle(document.querySelector('.task-tabs button[aria-selected="true"]')).backgroundColor;
+    return { search, empty, tab, selected };
+  })()`);
+  for (const [name, color] of Object.entries(solid)) assert.equal(color.startsWith('rgb('), true, name + ' ' + color);
 });

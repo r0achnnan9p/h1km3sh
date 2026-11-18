@@ -1201,11 +1201,10 @@ body:is([data-view="library"], [data-view="tasks"]) .views {
   .precision-layout .settings-item-icon svg { width:24px; height:24px; }
   .precision-layout .settings-group-label { margin-top:var(--space-4); }
   .precision-layout .settings-item-action { background:transparent; border:0; margin-right:0; }
-  .precision-layout .task-tabs { padding:0; gap:0; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; }
-  .precision-layout .task-tabs button { position:relative; border-radius:0; background:transparent; color:var(--muted); }
-  .precision-layout .task-tabs button[aria-selected='true'] { background:transparent; color:var(--accent); box-shadow:none; }
-  .precision-layout .task-tabs button[aria-selected='true']::after { content:''; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--accent); }
-  .precision-layout .task-tabs button > svg { display:none; }
+  .precision-layout .task-tabs { padding:4px; gap:4px; border:1px solid var(--glass-edge); border-radius:var(--radius-pill); background:var(--glass-light); box-shadow:none; -webkit-backdrop-filter:none; backdrop-filter:none; }
+  .precision-layout .task-tabs button { border-radius:var(--radius-pill); background:transparent; color:var(--muted); min-height:44px; }
+  .precision-layout .task-tabs button[aria-selected='true'] { background:var(--fill-control-strong); color:var(--text); box-shadow:none; }
+  .precision-layout .task-tabs button[aria-selected='true']::after { content:none; }
   .precision-layout .task-history { grid-template-columns:minmax(0,1fr) auto; padding:16px 0; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; box-shadow:none; }
   .precision-layout .task-history .task-status-icon { display:none; }
   .precision-layout .task-history .task-heading { grid-column:1/-1; }
@@ -1434,6 +1433,11 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) .replay-control-panel { position:absolute; z-index:8; left:max(var(--space-3),var(--safe-left)); right:max(var(--space-3),var(--safe-right)); bottom:max(var(--space-2),var(--safe-bottom)); max-height:calc(100% - max(var(--space-2),var(--safe-top)) - max(var(--space-2),var(--safe-bottom)) - 60px); padding:var(--space-2) var(--space-3); border:1px solid var(--line); border-radius:var(--radius-field); background:var(--surface); overflow-y:auto; overscroll-behavior:contain; transition:opacity var(--dur) var(--ease); }
 .precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded)[data-chrome-idle='true'] :is(.replay-topbar,.replay-control-panel) { opacity:0; pointer-events:none; }
 .precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) :is(.replay-topbar,.replay-control-panel):has(:focus-visible) { opacity:1; pointer-events:auto; }
+.precision-layout #view-replay.focus-replay.replay-frame-settling :is(.replay-topbar,.replay-selection-editor) { animation: motion-fade var(--dur) var(--ease) both; }
+.precision-layout #view-replay.focus-replay.replay-frame-settling .player-wrap { z-index: 5; }
+.precision-layout #view-replay.focus-replay.replay-frame-settling .player-wrap video,
+.precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) .player-wrap video { object-fit: contain; }
+.precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) #replay-system-fullscreen { display: inline-grid; min-width: 44px; min-height: 44px; padding-inline: 12px; border-radius: var(--radius-pill); }
 @media (max-width:1023px) {
   .standalone-viewport .precision-layout #view-replay.focus-replay.replay-expanded { position:absolute; inset:0 0 auto; height:var(--app-viewport-height); }
 }
@@ -1647,4 +1651,40 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
 }
 @media (min-width: 1024px) and (prefers-reduced-transparency: reduce) {
   .precision-layout .side-nav { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* 成片、任务、设置和弹层与回放共用同一套层级：查找和分段在上，主操作是白色胶囊，条目可滚。 */
+.precision-layout .library-search input,
+.precision-layout .library-tools #output-sort {
+  border: 1px solid var(--glass-edge); border-radius: var(--radius-pill); background: var(--glass-light);
+}
+.precision-layout .empty-card { border-style: solid; border-color: var(--glass-edge); background: var(--glass-light); }
+.precision-layout .task-tabs button[aria-selected='true'] { color: var(--text); background: var(--fill-control-strong); box-shadow: none; }
+.precision-layout button.settings-item::after {
+  content: ''; justify-self: end; width: 8px; height: 8px; border-right: 1.8px solid var(--dim); border-bottom: 1.8px solid var(--dim); transform: rotate(-45deg);
+}
+.precision-layout button.settings-item-danger::after,
+.precision-layout .settings-item-static::after { content: none; }
+.console-app .dialog-actions > .primary-button {
+  color: var(--on-cta); background: var(--cta); border-radius: var(--radius-pill); min-height: var(--control);
+}
+.console-app .dialog-description { color: var(--muted); }
+@media (prefers-reduced-transparency: reduce) {
+  .precision-layout .task-tabs,
+  .precision-layout .library-search input,
+  .precision-layout .library-tools #output-sort,
+  .precision-layout .empty-card { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .precision-layout .task-tabs button[aria-selected='true'] { background: var(--surface2); }
+}
+@media (min-width: 1024px) {
+  .precision-layout #view-library .output-grid { grid-template-columns: 1fr; gap: 0; }
+  .precision-layout #view-library .output-card {
+    display: grid; grid-template-columns: 168px minmax(0,1fr) auto; align-items: center; gap: 16px;
+    margin: 0; padding: 12px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent;
+  }
+  .precision-layout #view-library .output-preview { margin: 0; }
+  .precision-layout #view-library .output-actions { margin: 0; padding: 0; border: 0; }
+  .precision-layout #view-library .page-heading,
+  .precision-layout #view-tasks .page-heading,
+  .precision-layout #view-settings .page-heading { margin-bottom: 8px; }
 }

@@ -14,8 +14,9 @@ class Element {
   addEventListener(type,fn){this.listeners[type]=fn;}
   contains(node){return this===node||this.children.some(child=>child.contains(node));}
 }
-function harness(mode='native') {
-  const nodes=new Map(['view-replay','replay-overlays','replay-fullscreen','scrub-time-overlay','toast'].map(id=>[id,new Element()]));
+function harness(mode='native', frame=null) {
+  const nodes=new Map(['view-replay','replay-overlays','replay-fullscreen','replay-system-fullscreen','scrub-time-overlay','toast'].map(id=>[id,new Element()]));
+  if (frame) nodes.set('player-wrap', frame);
   let interrupts=0;
   const body=new Element(),view=nodes.get('view-replay'),overlays=nodes.get('replay-overlays'),listeners={},navigation=[];
   body.dataset={view:'replay'};body.append(view,overlays);overlays.append(...['scrub-time-overlay','toast'].map(id=>nodes.get(id)));
@@ -28,42 +29,134 @@ function harness(mode='native') {
   vm.runInContext(script.slice(script.indexOf('// Move shared overlays'),script.indexOf('// 断点只搬运')),context);
   Object.assign(context,{location:{hash:'#replay'},history:{pushState(_state,_title,hash){context.location.hash=hash;navigation.push(hash.slice(1));}},window:{scrollTo(){}},settingsInline:null,outputFeed:null,outputPlayers:{pauseAll(){}},activeDialog:null,clearReplay(){},refreshState:async()=>{},refreshOutputs:async()=>{},loadSettings:async()=>{},loadCache:async()=>{},loadConsoleConfig:async()=>{}});
   vm.runInContext(script.slice(script.indexOf('function navigate('),script.indexOf("\ndocument.querySelectorAll('[data-view]')")),context);
-  return{interrupts:()=>interrupts,body,view,overlays,nodes,listeners,document,context,navigation,click:()=>nodes.get('replay-fullscreen').listeners.click()};
+  return{interrupts:()=>interrupts,body,view,overlays,nodes,listeners,document,context,navigation,click:()=>nodes.get('replay-fullscreen').listeners.click(),systemClick:()=>nodes.get('replay-system-fullscreen').listeners.click()};
 }
 test('shared time/toast container is in the template and moves into native fullscreen then restores',async()=>{
   const html=statusDashboardPage();const container=html.slice(html.indexOf('id="replay-overlays"'));
   for(const id of ['scrub-time-overlay','toast']) assert.ok(container.includes(`id="${id}"`));
   const h=harness();
   for(let cycle=0;cycle<3;cycle++) {
-    await h.click();assert.equal(h.document.fullscreenElement,h.view);assert.equal(h.overlays.parentElement,h.view);
+    await h.systemClick();assert.equal(h.document.fullscreenElement,h.view);assert.equal(h.overlays.parentElement,h.view);
     for(const id of ['scrub-time-overlay','toast'])assert.ok(h.view.contains(h.nodes.get(id)));
-    assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'],'退出全屏回放');
-    await h.click();assert.equal(h.overlays.parentElement,h.body);assert.equal(h.document.fullscreenElement,null);assert.equal(h.body.children.filter(node=>node===h.overlays).length,1);
+    assert.equal(h.nodes.get('replay-system-fullscreen').attrs['aria-label'],'退出系统全屏');
+    await h.systemClick();assert.equal(h.overlays.parentElement,h.body);assert.equal(h.document.fullscreenElement,null);assert.equal(h.body.children.filter(node=>node===h.overlays).length,1);
   }
+});
+test('a cancelled enter animation cannot drop the exit animation that replaced it', async () => {
+  let expanded = false;
+  const motions = [];
+  const frame = {
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    getBoundingClientRect() { return expanded ? { left: 0, top: 0, width: 800, height: 400 } : { left: 20, top: 40, width: 400, height: 200 }; },
+    animate() {
+      const listeners = {};
+      const motion = {
+        addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+        cancel() { this.cancelled = true; queueMicrotask(() => listeners.cancel?.forEach(fn => fn())); },
+      };
+      motions.push(motion);
+      return motion;
+    },
+  };
+  const viewListeners = {};
+  const h = harness('rejected', frame);
+  const originalAdd = h.view.classList.add.bind(h.view.classList);
+  const originalRemove = h.view.classList.remove.bind(h.view.classList);
+  h.view.classList.add = name => { if (name === 'replay-expanded') expanded = true; originalAdd(name); };
+  h.view.classList.remove = name => { if (name === 'replay-expanded') expanded = false; originalRemove(name); };
+  h.view.classList.contains = name => name === 'replay-expanded' ? expanded : h.view.classes.has(name);
+  await h.click();
+  assert.equal(motions.length, 1);
+  h.listeners.keydown({ key: 'Escape' });
+  assert.equal(motions.length, 2);
+  assert.equal(motions[0].cancelled, true);
+  await new Promise(resolve => setImmediate(resolve));
+  h.listeners.keydown({ key: 'Escape' });
+  assert.equal(motions[1].cancelled, true, 'the replacement animation stays cancellable after the old cancel event');
+});
+test('mismatched fullscreen boxes switch directly instead of scaling only the width', async () => {
+  let expanded = false;
+  const animated = [];
+  const frame = {
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    getBoundingClientRect() { return expanded ? { left: 0, top: 0, width: 430, height: 932 } : { left: 15, top: 160, width: 400, height: 225 }; },
+    animate(frames) { animated.push(frames); return { addEventListener() {}, cancel() {} }; },
+  };
+  const h = harness('rejected', frame);
+  const originalAdd = h.view.classList.add.bind(h.view.classList);
+  h.view.classList.add = name => { if (name === 'replay-expanded') expanded = true; originalAdd(name); };
+  await h.click();
+  assert.equal(h.view.classList.contains('replay-expanded'), true);
+  assert.equal(animated.length, 1);
+  assert.equal(animated[0][0].width, '400px');
+  assert.equal(animated[0][0].height, '225px');
+  assert.equal(animated[0][1].width, '430px');
+  assert.equal(animated[0][1].height, '932px');
+});
+test('one immersion exit leaves both the stage and native fullscreen', async () => {
+  const h = harness('native');
+  await h.click();
+  assert.equal(h.nodes.get('replay-system-fullscreen').hidden, false, '系统全屏要在沉浸之后才出现');
+  await h.systemClick();
+  assert.equal(h.document.fullscreenElement, h.view);
+  assert.equal(h.view.classList.contains('replay-expanded'), true);
+  await h.click();
+  assert.equal(h.document.fullscreenElement, null);
+  assert.equal(h.view.classList.contains('replay-expanded'), false);
+  assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'], '沉浸回放');
+});
+test('system fullscreen exits only the browser and keeps web immersion', async () => {
+  const h = harness('native');
+  await h.click();
+  await h.systemClick();
+  await h.systemClick();
+  assert.equal(h.document.fullscreenElement, null);
+  assert.equal(h.view.classList.contains('replay-expanded'), true);
+  assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'], '退出沉浸回放');
+});
+test('system fullscreen stays hidden without the API and explains a refusal', async () => {
+  const unsupported = harness('unsupported');
+  await unsupported.click();
+  assert.equal(unsupported.nodes.get('replay-system-fullscreen').hidden, true);
+  const rejected = harness('rejected');
+  await rejected.click();
+  assert.equal(rejected.nodes.get('replay-system-fullscreen').hidden, false);
+  await rejected.systemClick();
+  assert.equal(rejected.document.fullscreenElement, null);
+  assert.equal(rejected.view.classList.contains('replay-expanded'), true);
+  assert.equal(rejected.nodes.get('toast').classList.contains('error'), true);
+  assert.match(rejected.nodes.get('toast').textContent, /系统全屏被拒绝/);
+});
+test('fullscreen continuity skips missing frames and still expands when native fullscreen is rejected',async()=>{
+  const h=harness('rejected');await h.click();
+  assert.equal(h.view.classList.contains('replay-expanded'),true);
+  assert.equal(h.nodes.get('replay-player'),undefined);
+  h.listeners.keydown({key:'Escape'});
+  assert.equal(h.view.classList.contains('replay-expanded'),false);
 });
 test('unsupported or rejected native fullscreen uses CSS expansion with overlays inside and Escape restores',async()=>{
   for(const mode of ['unsupported','rejected']) {
     const h=harness(mode);await h.click();assert.equal(h.view.classList.contains('replay-expanded'),true);assert.equal(h.overlays.parentElement,h.view);
-    h.listeners.keydown({key:'Escape'});assert.equal(h.view.classList.contains('replay-expanded'),false);assert.equal(h.overlays.parentElement,h.body);assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'],'全屏回放');
+    h.listeners.keydown({key:'Escape'});assert.equal(h.view.classList.contains('replay-expanded'),false);assert.equal(h.overlays.parentElement,h.body);assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'],'沉浸回放');
     await h.click();await h.click();assert.equal(h.overlays.parentElement,h.body);
   }
 });
 test('native external exit restores overlays and toast arrow exits both fullscreen modes before navigation',async()=>{
   for(const mode of ['native','unsupported']) {
-    const h=harness(mode);await h.click();h.context.notify('已提交',false,{icon:'download',range:'12:00:00 → 12:00:10'});
+    const h=harness(mode);await (mode==='native'?h.systemClick():h.click());h.context.notify('已提交',false,{icon:'download',range:'12:00:00 → 12:00:10'});
     const arrow=h.nodes.get('toast').children[2];assert.ok(h.view.contains(arrow));arrow.listeners.click();await settle();
     assert.deepEqual(h.navigation,['tasks']);assert.equal(h.overlays.parentElement,h.body);assert.equal(h.document.fullscreenElement,null);assert.equal(h.view.classList.contains('replay-expanded'),false);
   }
-  const h=harness();await h.click();h.document.fullscreenElement=null;h.listeners.fullscreenchange();assert.equal(h.overlays.parentElement,h.body);
+  const h=harness();await h.systemClick();h.document.fullscreenElement=null;h.listeners.fullscreenchange();assert.equal(h.overlays.parentElement,h.body);
 });
 test('failed native exit keeps overlays in fullscreen and gives an error without navigating into hidden tasks',async()=>{
-  const h=harness();await h.click();h.document.exitFullscreen=async()=>{throw Error('blocked');};
+  const h=harness();await h.systemClick();h.document.exitFullscreen=async()=>{throw Error('blocked');};
   h.context.notify('已提交',false,{range:'fixture range'});h.nodes.get('toast').children[2].listeners.click();await settle();
   assert.equal(h.overlays.parentElement,h.view);assert.deepEqual(h.navigation,[]);assert.equal(h.nodes.get('toast').classList.contains('error'),true);
 });
 test('rapid fullscreen clicks make one pending request and keep one overlay container',async()=>{
   const h=harness();let resolve,calls=0;h.view.requestFullscreen=()=>{calls++;return new Promise(done=>{resolve=()=>{h.document.fullscreenElement=h.view;done();};});};
-  const first=h.click();await h.click();assert.equal(calls,1);resolve();await first;assert.equal(h.view.children.filter(node=>node===h.overlays).length,1);
+  const first=h.systemClick();await h.systemClick();assert.equal(calls,1);resolve();await first;assert.equal(h.view.children.filter(node=>node===h.overlays).length,1);
 });
 
 test('route changes leave native/CSS fullscreen before hiding replay; rejected exit preserves replay',async()=>{
@@ -72,13 +165,13 @@ test('route changes leave native/CSS fullscreen before hiding replay; rejected e
     h.document.querySelectorAll=()=>[];
     Object.assign(h.context,{location:{hash:'#replay'},history:{pushState(){}},window:{scrollTo(){}},settingsInline:null,outputFeed:null,outputPlayers:{pauseAll(){}},activeDialog:null,clearReplay(){},refreshState:async()=>{}});
     vm.runInContext(script.slice(script.indexOf('function navigate('),script.indexOf("\ndocument.querySelectorAll('[data-view]')")),h.context);
-    await h.click();h.context.navigate('tasks');await new Promise(resolve=>setImmediate(resolve));
+    await (mode==='native'?h.systemClick():h.click());h.context.navigate('tasks');await new Promise(resolve=>setImmediate(resolve));
     assert.equal(h.document.body.dataset.view,'tasks');assert.equal(h.overlays.parentElement,h.body);assert.equal(h.document.fullscreenElement,null);
   }
   const h=harness();h.document.body.dataset={view:'replay'};h.document.querySelectorAll=()=>[];
   Object.assign(h.context,{location:{hash:'#replay'},history:{pushState(){}},window:{scrollTo(){}},settingsInline:null,outputFeed:null,outputPlayers:{pauseAll(){}},activeDialog:null,clearReplay(){},refreshState:async()=>{}});
   vm.runInContext(script.slice(script.indexOf('function navigate('),script.indexOf("\ndocument.querySelectorAll('[data-view]')")),h.context);
-  await h.click();h.document.exitFullscreen=async()=>{throw Error('blocked');};h.context.navigate('tasks');await new Promise(resolve=>setImmediate(resolve));
+  await h.systemClick();h.document.exitFullscreen=async()=>{throw Error('blocked');};h.context.navigate('tasks');await new Promise(resolve=>setImmediate(resolve));
   assert.equal(h.document.body.dataset.view,'replay');assert.equal(h.overlays.parentElement,h.view);
 });
 
@@ -88,7 +181,7 @@ function delayEntry(h){const d=deferred();h.view.requestFullscreen=()=>d.promise
 function delayExit(h){const d=deferred();let calls=0;h.document.exitFullscreen=()=>{calls++;return d.promise;};return{...d,resolve(){h.document.fullscreenElement=null;h.listeners.fullscreenchange();d.resolve();},calls:()=>calls};}
 test('pending enter settled after navigation never expands a hidden replay or steals global notices',async()=>{
   for(const outcome of ['resolve','reject']) {
-    const h=harness(),request=delayEntry(h),enter=h.click();
+    const h=harness(),request=delayEntry(h),enter=h.systemClick();
     h.context.navigate('tasks');assert.equal(h.body.dataset.view,'tasks');
     if(outcome==='resolve')request.resolve();else request.reject(Error('denied'));
     await enter;await settle();
@@ -99,7 +192,7 @@ test('pending enter settled after navigation never expands a hidden replay or st
 });
 test('Escape cancels a pending enter for both native success and rejected fallback, including route round trips',async()=>{
   for(const outcome of ['resolve','reject'])for(const roundTrip of [false,true]) {
-    const h=harness(),request=delayEntry(h),enter=h.click();h.listeners.keydown({key:'Escape'});
+    const h=harness(),request=delayEntry(h),enter=h.systemClick();h.listeners.keydown({key:'Escape'});
     if(roundTrip){h.context.navigate('tasks');h.context.navigate('replay');}
     if(outcome==='resolve')request.resolve();else request.reject(Error('denied'));
     await enter;await settle();assert.equal(h.body.dataset.view,'replay');assert.equal(h.document.fullscreenElement,null);assert.equal(h.view.classList.contains('replay-expanded'),false);assert.equal(h.overlays.parentElement,h.body);
@@ -107,7 +200,7 @@ test('Escape cancels a pending enter for both native success and rejected fallba
 });
 test('a newer route or Back invalidates the old pending exit navigation, including rejected exits',async()=>{
   for(const newer of ['settings','replay'])for(const outcome of ['resolve','reject']) {
-    const h=harness();await h.click();const exit=delayExit(h);h.context.navigate('tasks');
+    const h=harness();await h.systemClick();const exit=delayExit(h);h.context.navigate('tasks');
     h.context.location.hash='#'+newer;h.context.navigate(newer,false);assert.equal(exit.calls(),1);
     if(outcome==='resolve')exit.resolve();else exit.reject(Error('denied'));
     await settle();assert.equal(h.context.location.hash,'#'+newer);assert.ok(!h.navigation.includes('tasks'));
@@ -116,7 +209,7 @@ test('a newer route or Back invalidates the old pending exit navigation, includi
   }
 });
 test('toast navigation participates in the same generation and cannot overtake a newer route',async()=>{
-  const h=harness();await h.click();const exit=delayExit(h);h.context.notify('submitted',false,{range:'synthetic'});h.nodes.get('toast').children[2].listeners.click();
+  const h=harness();await h.systemClick();const exit=delayExit(h);h.context.notify('submitted',false,{range:'synthetic'});h.nodes.get('toast').children[2].listeners.click();
   h.context.navigate('settings');exit.resolve();await settle();assert.equal(h.body.dataset.view,'settings');assert.deepEqual(h.navigation,['settings']);assert.equal(h.overlays.parentElement,h.body);
 });
 

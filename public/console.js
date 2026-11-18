@@ -1867,7 +1867,7 @@ function makeTaskCard(task, uploadTask) {
     footer.append(cancel);
   }
   if (task.provider === 'cloud189' && task.status === 'unknown' && !task.archivedAt) {
-    const verify = document.createElement('button'); verify.type = 'button'; verify.className = 'quiet-button';
+    const verify = document.createElement('button'); verify.type = 'button'; verify.className = 'primary-button';
     verify.disabled = cloudVerificationPending.has(task.id);
     verify.textContent = verify.disabled ? '正在核实…' : '核实结果';
     verify.addEventListener('click', async () => {
@@ -1955,7 +1955,7 @@ function makeDvrHttpSampleCard(task) {
   const footer = document.createElement('div'); footer.className = 'task-footer';
   const kind = document.createElement('span'); kind.textContent = 'HTTP 兼容性报告'; footer.append(kind);
   if (Object.getOwnPropertyDescriptor(task, 'sampleResumeAvailable')?.value === true) {
-    const resume = document.createElement('button'); resume.type = 'button'; resume.className = 'quiet-button'; resume.textContent = '继续未开始的测试';
+    const resume = document.createElement('button'); resume.type = 'button'; resume.className = 'primary-button'; resume.textContent = '继续未开始的测试';
     resume.disabled = dvrHttpSamplePending.has(task.taskId);
     resume.addEventListener('click', () => { if (resume.disabled) return; resume.disabled = true; return startDvrHttpSample(task); }); footer.append(resume);
   }
@@ -2815,8 +2815,52 @@ syncTimelineZoomButtons();
 boot();
 
 // Move shared overlays into the fullscreen subtree; top-layer membership cannot be fixed with z-index.
+// Native fullscreen is the browser's own transition: request it inside the click, then only fade the
+// source bar and selection. The CSS fallback grows the same player from its current rectangle.
 const replayOverlayHome = $('replay-overlays')?.parentElement;
-let replayFullscreenPending = false, replayFullscreenGeneration = 0, replayFullscreenWanted = false, replayFullscreenExit = null;
+let replayFullscreenPending = false, replayFullscreenGeneration = 0, replayFullscreenWanted = false, replayFullscreenExit = null, replayFrameMotion = null;
+function replayMotionReduced() {
+  try { return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch { return true; }
+}
+function replayFrameBox() {
+  const frame = $('player-wrap');
+  if (!frame || typeof frame.getBoundingClientRect !== 'function') return null;
+  const box = frame.getBoundingClientRect();
+  return box.width > 1 && box.height > 1 ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
+}
+function cancelReplayFrameMotion() {
+  const motion = replayFrameMotion;
+  replayFrameMotion = null;
+  try { motion?.cancel(); } catch { /* finished */ }
+  const frame = $('player-wrap');
+  if (frame?.style) { frame.style.position = ''; frame.style.left = ''; frame.style.top = ''; frame.style.width = ''; frame.style.height = ''; frame.style.right = ''; frame.style.bottom = ''; }
+  if (replayFrameMotion === null) $('view-replay')?.classList?.remove('replay-frame-settling');
+}
+// The frame's rectangle interpolates on both axes. The video stays object-fit:contain inside it,
+// so a 225px-tall card can grow into a 932px-tall stage without stretching or cropping the picture.
+function morphReplayFrame(from, to) {
+  const frame = $('player-wrap');
+  if (!from || !to || replayMotionReduced() || typeof frame?.animate !== 'function') return;
+  if (Math.abs(from.left - to.left) < 1 && Math.abs(from.top - to.top) < 1 && Math.abs(from.width - to.width) < 1 && Math.abs(from.height - to.height) < 1) return;
+  if (frame.style) { frame.style.position = 'fixed'; frame.style.right = 'auto'; frame.style.bottom = 'auto'; frame.style.margin = '0'; }
+  $('view-replay')?.classList?.add('replay-frame-settling');
+  const motion = frame.animate([
+    { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: '20px' },
+    { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, borderRadius: '0px' }
+  ], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'both' });
+  replayFrameMotion = motion;
+  const finish = () => {
+    if (replayFrameMotion !== motion) return;
+    replayFrameMotion = null;
+    if (frame.style) { frame.style.position = ''; frame.style.left = ''; frame.style.top = ''; frame.style.width = ''; frame.style.height = ''; frame.style.right = ''; frame.style.bottom = ''; frame.style.margin = ''; }
+    $('view-replay')?.classList?.remove('replay-frame-settling');
+    try { motion.cancel(); } catch { /* already finished */ }
+  };
+  motion.addEventListener?.('finish', finish);
+  motion.addEventListener?.('cancel', finish);
+}
+if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('resize', () => { if (replayFrameMotion) cancelReplayFrameMotion(); });
 function syncReplayFullscreen() {
   const view = $('view-replay'), overlays = $('replay-overlays');
   const active = document.body.dataset.view === 'replay';
@@ -2824,21 +2868,39 @@ function syncReplayFullscreen() {
   const expanded = active && (document.fullscreenElement === view || view.classList.contains('replay-expanded'));
   const parent = expanded ? view : replayOverlayHome;
   if (overlays && parent && overlays.parentElement !== parent) parent.append(overlays);
-  $('replay-fullscreen')?.setAttribute('aria-label', expanded ? '退出全屏回放' : '全屏回放');
+  $('replay-fullscreen')?.setAttribute('aria-label', (view.classList.contains('replay-expanded') || document.fullscreenElement === view) ? '退出沉浸回放' : '沉浸回放');
+  const system = $('replay-system-fullscreen');
+  if (system) {
+    const native = document.fullscreenElement === view;
+    const supported = typeof view.requestFullscreen === 'function';
+    system.hidden = !supported || !(view.classList.contains('replay-expanded') || native);
+    system.disabled = !supported;
+    system.setAttribute('aria-label', native ? '退出系统全屏' : '进入系统全屏');
+  }
   if (typeof syncReplayControls === 'function') syncReplayControls();
 }
 function cancelReplayFullscreenEntry() {
+  const view = $('view-replay');
+  const from = view.classList.contains('replay-expanded') && document.fullscreenElement !== view ? replayFrameBox() : null;
   replayFullscreenGeneration++; replayFullscreenWanted = false;
-  $('view-replay').classList.remove('replay-expanded'); syncReplayFullscreen();
+  cancelReplayFrameMotion();
+  view.classList.remove('replay-expanded'); syncReplayFullscreen();
+  if (from) morphReplayFrame(from, replayFrameBox());
 }
 function leaveReplayFullscreen() {
   interruptTimelineScrub();
-  cancelReplayFullscreenEntry();
   if (replayFullscreenExit) return replayFullscreenExit;
-  if (document.fullscreenElement !== $('view-replay')) return Promise.resolve(true);
+  const view = $('view-replay');
+  if (document.fullscreenElement !== view) { cancelReplayFullscreenEntry(); return Promise.resolve(true); }
   replayFullscreenExit = (async () => {
-    try { await document.exitFullscreen(); return document.fullscreenElement !== $('view-replay'); }
-    catch { return false; }
+    try {
+      await document.exitFullscreen();
+      const left = document.fullscreenElement !== view;
+      if (left) cancelReplayFullscreenEntry();
+      else notify('无法退出系统全屏，沉浸回放仍保持打开。', true);
+      return left;
+    }
+    catch { notify('无法退出系统全屏，沉浸回放仍保持打开。', true); return false; }
     finally { replayFullscreenExit = null; syncReplayFullscreen(); }
   })();
   return replayFullscreenExit;
@@ -2850,16 +2912,36 @@ $('replay-fullscreen')?.addEventListener('click', async () => {
   const view = $('view-replay');
   const generation = ++replayFullscreenGeneration;
   try {
-    if (document.fullscreenElement === view || view.classList.contains('replay-expanded')) await leaveReplayFullscreen();
+    if (view.classList.contains('replay-expanded') || document.fullscreenElement === view) await leaveReplayFullscreen();
     else {
-      replayFullscreenWanted = true;
-      if (view.requestFullscreen) {
-        try { await view.requestFullscreen(); }
-        catch { if (generation === replayFullscreenGeneration && document.body.dataset.view === 'replay') view.classList.add('replay-expanded'); }
-      } else view.classList.add('replay-expanded');
-      // A request can settle after navigation/Escape; never resurrect the old replay session.
-      if (generation !== replayFullscreenGeneration || document.body.dataset.view !== 'replay') await leaveReplayFullscreen();
+      const from = replayFrameBox();
+      view.classList.add('replay-expanded');
+      syncReplayFullscreen();
+      if (generation === replayFullscreenGeneration && document.body.dataset.view === 'replay') morphReplayFrame(from, replayFrameBox());
+      else { view.classList.remove('replay-expanded'); syncReplayFullscreen(); }
     }
+  } finally { replayFullscreenPending = false; syncReplayFullscreen(); }
+});
+$('replay-system-fullscreen')?.addEventListener('click', async () => {
+  if (replayFullscreenPending || replayFullscreenExit || document.body.dataset.view !== 'replay') return;
+  interruptTimelineScrub();
+  const view = $('view-replay');
+  if (typeof view.requestFullscreen !== 'function') { syncReplayFullscreen(); return; }
+  if (document.fullscreenElement === view) {
+    replayFullscreenPending = true;
+    replayFullscreenWanted = view.classList.contains('replay-expanded');
+    try { await document.exitFullscreen(); }
+    catch { notify('无法退出系统全屏，沉浸回放仍保持打开。', true); }
+    finally { replayFullscreenPending = false; syncReplayFullscreen(); }
+    return;
+  }
+  replayFullscreenPending = true;
+  replayFullscreenWanted = true;
+  const generation = ++replayFullscreenGeneration;
+  try {
+    try { await view.requestFullscreen(); }
+    catch { notify('系统全屏被拒绝，仍停留在沉浸回放。', true); }
+    if ((generation !== replayFullscreenGeneration || document.body.dataset.view !== 'replay') && document.fullscreenElement === view) await leaveReplayFullscreen();
   } finally { replayFullscreenPending = false; syncReplayFullscreen(); }
 });
 document.addEventListener('fullscreenchange', () => {
