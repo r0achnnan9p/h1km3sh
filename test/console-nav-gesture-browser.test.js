@@ -505,6 +505,8 @@ test('standalone viewport geometry remains visible during resize and stable duri
   await b.evaluate(`document.querySelector('.mobile-nav button[data-view="replay"]').click()`); await sleep(100);
   assert.equal(await b.evaluate(`document.documentElement.classList.contains('standalone-viewport')`),true,'narrow landscape also follows visible nav bounds');
   await device(430,932);
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(50);
   await b.send('Runtime.evaluate',{expression:`document.getElementById('replay-system-fullscreen').click()`,userGesture:true,awaitPromise:true});
   await sleep(100);
   for(let i=0;i<40 && !await b.evaluate(`!!document.fullscreenElement`);i++) await sleep(50);

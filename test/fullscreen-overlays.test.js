@@ -93,6 +93,40 @@ test('mismatched fullscreen boxes switch directly instead of scaling only the wi
   assert.equal(animated[0][1].width, '430px');
   assert.equal(animated[0][1].height, '932px');
 });
+test('one immersion exit leaves both the stage and native fullscreen', async () => {
+  const h = harness('native');
+  await h.click();
+  assert.equal(h.nodes.get('replay-system-fullscreen').hidden, false, '系统全屏要在沉浸之后才出现');
+  await h.systemClick();
+  assert.equal(h.document.fullscreenElement, h.view);
+  assert.equal(h.view.classList.contains('replay-expanded'), true);
+  await h.click();
+  assert.equal(h.document.fullscreenElement, null);
+  assert.equal(h.view.classList.contains('replay-expanded'), false);
+  assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'], '沉浸回放');
+});
+test('system fullscreen exits only the browser and keeps web immersion', async () => {
+  const h = harness('native');
+  await h.click();
+  await h.systemClick();
+  await h.systemClick();
+  assert.equal(h.document.fullscreenElement, null);
+  assert.equal(h.view.classList.contains('replay-expanded'), true);
+  assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'], '退出沉浸回放');
+});
+test('system fullscreen stays hidden without the API and explains a refusal', async () => {
+  const unsupported = harness('unsupported');
+  await unsupported.click();
+  assert.equal(unsupported.nodes.get('replay-system-fullscreen').hidden, true);
+  const rejected = harness('rejected');
+  await rejected.click();
+  assert.equal(rejected.nodes.get('replay-system-fullscreen').hidden, false);
+  await rejected.systemClick();
+  assert.equal(rejected.document.fullscreenElement, null);
+  assert.equal(rejected.view.classList.contains('replay-expanded'), true);
+  assert.equal(rejected.nodes.get('toast').classList.contains('error'), true);
+  assert.match(rejected.nodes.get('toast').textContent, /系统全屏被拒绝/);
+});
 test('fullscreen continuity skips missing frames and still expands when native fullscreen is rejected',async()=>{
   const h=harness('rejected');await h.click();
   assert.equal(h.view.classList.contains('replay-expanded'),true);

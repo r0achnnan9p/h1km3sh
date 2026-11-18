@@ -2872,7 +2872,9 @@ function syncReplayFullscreen() {
   const system = $('replay-system-fullscreen');
   if (system) {
     const native = document.fullscreenElement === view;
-    system.hidden = !(view.classList.contains('replay-expanded') || native);
+    const supported = typeof view.requestFullscreen === 'function';
+    system.hidden = !supported || !(view.classList.contains('replay-expanded') || native);
+    system.disabled = !supported;
     system.setAttribute('aria-label', native ? '退出系统全屏' : '进入系统全屏');
   }
   if (typeof syncReplayControls === 'function') syncReplayControls();
@@ -2887,16 +2889,18 @@ function cancelReplayFullscreenEntry() {
 }
 function leaveReplayFullscreen() {
   interruptTimelineScrub();
-  cancelReplayFullscreenEntry();
   if (replayFullscreenExit) return replayFullscreenExit;
-  if (document.fullscreenElement !== $('view-replay')) return Promise.resolve(true);
+  const view = $('view-replay');
+  if (document.fullscreenElement !== view) { cancelReplayFullscreenEntry(); return Promise.resolve(true); }
   replayFullscreenExit = (async () => {
     try {
       await document.exitFullscreen();
-      const left = document.fullscreenElement !== $('view-replay');
+      const left = document.fullscreenElement !== view;
+      if (left) cancelReplayFullscreenEntry();
+      else notify('无法退出系统全屏，沉浸回放仍保持打开。', true);
       return left;
     }
-    catch { return false; }
+    catch { notify('无法退出系统全屏，沉浸回放仍保持打开。', true); return false; }
     finally { replayFullscreenExit = null; syncReplayFullscreen(); }
   })();
   return replayFullscreenExit;
@@ -2908,8 +2912,7 @@ $('replay-fullscreen')?.addEventListener('click', async () => {
   const view = $('view-replay');
   const generation = ++replayFullscreenGeneration;
   try {
-    if (view.classList.contains('replay-expanded')) cancelReplayFullscreenEntry();
-    else if (document.fullscreenElement === view) await leaveReplayFullscreen();
+    if (view.classList.contains('replay-expanded') || document.fullscreenElement === view) await leaveReplayFullscreen();
     else {
       const from = replayFrameBox();
       view.classList.add('replay-expanded');
@@ -2923,15 +2926,21 @@ $('replay-system-fullscreen')?.addEventListener('click', async () => {
   if (replayFullscreenPending || replayFullscreenExit || document.body.dataset.view !== 'replay') return;
   interruptTimelineScrub();
   const view = $('view-replay');
-  if (document.fullscreenElement === view) { await leaveReplayFullscreen(); return; }
+  if (typeof view.requestFullscreen !== 'function') { syncReplayFullscreen(); return; }
+  if (document.fullscreenElement === view) {
+    replayFullscreenPending = true;
+    replayFullscreenWanted = view.classList.contains('replay-expanded');
+    try { await document.exitFullscreen(); }
+    catch { notify('无法退出系统全屏，沉浸回放仍保持打开。', true); }
+    finally { replayFullscreenPending = false; syncReplayFullscreen(); }
+    return;
+  }
   replayFullscreenPending = true;
   replayFullscreenWanted = true;
   const generation = ++replayFullscreenGeneration;
   try {
-    if (typeof view.requestFullscreen === 'function') {
-      try { await view.requestFullscreen(); }
-      catch { /* The browser refused. Web immersion remains the smooth path. */ }
-    }
+    try { await view.requestFullscreen(); }
+    catch { notify('系统全屏被拒绝，仍停留在沉浸回放。', true); }
     if ((generation !== replayFullscreenGeneration || document.body.dataset.view !== 'replay') && document.fullscreenElement === view) await leaveReplayFullscreen();
   } finally { replayFullscreenPending = false; syncReplayFullscreen(); }
 });
