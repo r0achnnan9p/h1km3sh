@@ -1636,6 +1636,7 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
     margin-left: 0; flex: 1; min-height: 0; height: auto;
     border: 1px solid var(--glass-edge); border-radius: var(--radius-shell); background: var(--surface); overflow: hidden;
   }
+  body.precision-layout[data-view='settings'] .workspace-main { overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; }
   body.precision-layout[data-view='replay'] .views { padding: 16px 20px 12px; }
   .precision-layout #view-replay.focus-replay[data-chrome-overlay='false'] .replay-control-panel { margin-top: -68px; position: relative; z-index: 4; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; border: 0; }
   .precision-layout #view-replay.focus-replay .replay-toolbar {
@@ -1643,4 +1644,7 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
     border: 1px solid var(--glass-edge); border-radius: var(--radius-pill); background: var(--material-scrim);
   }
   .precision-layout #view-replay.focus-replay .timeline-section { padding-top: 4px; }
+}
+@media (min-width: 1024px) and (prefers-reduced-transparency: reduce) {
+  .precision-layout .side-nav { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }

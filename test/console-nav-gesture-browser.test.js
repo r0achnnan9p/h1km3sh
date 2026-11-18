@@ -1089,3 +1089,69 @@ test('iPhone 14 Pro Max replay keeps the export cue, safe landscape chrome and a
   assert.equal(await b.evaluate("document.querySelector('dialog[open]') === null && document.activeElement.id === 'playback-context'"), true);
   assert.equal(await b.evaluate(`document.getElementById('selection-help').textContent`), '先标记入点，再标记出点。');
 });
+
+test('short desktop settings scroll to the cover save control and the top nav honors reduced transparency', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const res = createResources(); t.after(() => res.closeAll());
+  const server = await startFixture(res), b = await launch(res);
+  await b.send('Page.enable'); await b.send('Runtime.enable');
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 640, deviceScaleFactor: 1, mobile: false });
+  await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal#settings` });
+  for (let i = 0; i < 100 && await b.evaluate(`document.body?.dataset.view`) !== 'settings'; i++) await sleep(100);
+  await b.evaluate(`document.querySelector('.side-nav button[data-view="settings"]').click(); document.getElementById('settings-open-bilibili').click()`);
+  await sleep(200);
+  const before = await b.evaluate(`(() => {
+    const main = document.querySelector('.workspace-main');
+    const save = document.getElementById('cover-save');
+    const mainBox = main.getBoundingClientRect(), saveBox = save.getBoundingClientRect();
+    return { scroll: main.scrollHeight > main.clientHeight + 8, hidden: saveBox.bottom > mainBox.bottom + 1, page: document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1 };
+  })()`);
+  assert.equal(before.scroll, true, '设置工作区必须能滚动');
+  assert.equal(before.hidden, true, '保存按钮起初在可视区下方');
+  assert.equal(before.page, true, '滚动发生在设置工作区，而不是整页');
+  const wheelAt = await b.evaluate(`(() => { const r = document.querySelector('.settings-desktop-detail').getBoundingClientRect(); return { x: r.x + r.width / 2, y: Math.min(r.bottom, innerHeight) - 40 }; })()`);
+  for (let i = 0; i < 8 && await b.evaluate(`document.querySelector('.workspace-main').scrollTop < 40`); i++) {
+    await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wheelAt.x, y: wheelAt.y, deltaX: 0, deltaY: 240 });
+    await sleep(40);
+  }
+  assert.ok(await b.evaluate(`document.querySelector('.workspace-main').scrollTop > 40`), '滚轮滚动设置工作区');
+  await b.evaluate(`document.querySelector('.workspace-main').scrollTop = 0`);
+  await b.evaluate(`(() => {const c=document.createElement('canvas');c.width=c.height=2;const bytes=Uint8Array.from(atob(c.toDataURL('image/png').split(',')[1]),x=>x.charCodeAt(0));const transfer=new DataTransfer();transfer.items.add(new File([bytes],'synthetic.png',{type:'image/png'}));const input=document.getElementById('bili-cover-file');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  for (let i = 0; i < 40 && await b.evaluate(`document.getElementById('cover-save').disabled`); i++) await sleep(50);
+  await b.evaluate(`document.getElementById('cover-save').focus()`);
+  await sleep(100);
+  const reached = await b.evaluate(`(() => {
+    const main = document.querySelector('.workspace-main');
+    const save = document.getElementById('cover-save');
+    const box = save.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return { focus: document.activeElement === save, scroll: main.scrollTop > 40, hit: save.contains(hit), top: box.top, bottom: box.bottom, view: main.getBoundingClientRect().bottom };
+  })()`);
+  assert.equal(reached.focus, true);
+  assert.equal(reached.scroll, true, JSON.stringify(reached));
+  assert.equal(reached.hit, true, JSON.stringify(reached));
+  assert.ok(reached.bottom <= reached.view + 1, JSON.stringify(reached));
+  await b.evaluate(`document.getElementById('cover-save').click()`);
+  await sleep(100);
+  assert.match(await b.evaluate(`document.getElementById('cover-message').textContent`), /正在保存封面|封面/);
+  await b.evaluate(`document.querySelector('.side-nav button[data-view="replay"]').click()`);
+  await sleep(200);
+  const replay = await b.evaluate(`(() => {
+    const view = document.getElementById('view-replay');
+    const box = id => { const r = document.getElementById(id).getBoundingClientRect(); return r.bottom; };
+    return { scrolls: view.scrollHeight > view.clientHeight + 1, fit: getComputedStyle(document.getElementById('replay-player')).objectFit,
+      export: box('export-range'), timeline: box('timeline-overview'), play: box('transport-toggle'), height: innerHeight };
+  })()`);
+  assert.equal(replay.scrolls, false);
+  assert.equal(replay.fit, 'contain');
+  assert.ok(replay.export <= replay.height && replay.timeline <= replay.height && replay.play <= replay.height, JSON.stringify(replay));
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] });
+  await sleep(50);
+  const reduced = await b.evaluate(`(() => { const nav = getComputedStyle(document.querySelector('.side-nav')); return { background: nav.backgroundColor, filter: nav.backdropFilter || nav.webkitBackdropFilter }; })()`);
+  assert.equal(reduced.background, 'rgb(47, 52, 62)');
+  assert.equal(reduced.filter, 'none');
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }] });
+  await sleep(50);
+  const glass = await b.evaluate(`(() => { const nav = getComputedStyle(document.querySelector('.side-nav')); return { background: nav.backgroundColor, filter: nav.backdropFilter || nav.webkitBackdropFilter }; })()`);
+  assert.equal(glass.background, 'rgba(186, 214, 247, 0.12)');
+  assert.match(glass.filter, /blur/);
+});
