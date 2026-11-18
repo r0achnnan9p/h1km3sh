@@ -1665,6 +1665,13 @@ body.precision-layout .console-shell { background: var(--workspace-wash); }
   color: var(--on-cta); background: var(--cta); border-radius: var(--radius-pill); min-height: var(--control);
 }
 .console-app .dialog-description { color: var(--muted); }
+@media (prefers-reduced-transparency: reduce) {
+  .precision-layout .task-tabs,
+  .precision-layout .library-search input,
+  .precision-layout .library-tools #output-sort,
+  .precision-layout .empty-card { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .precision-layout .task-tabs button[aria-selected='true'] { background: var(--surface2); }
+}
 @media (min-width: 1024px) {
   .precision-layout #view-library .output-grid { grid-template-columns: 1fr; gap: 0; }
   .precision-layout #view-library .output-card {

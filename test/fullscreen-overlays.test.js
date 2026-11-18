@@ -14,8 +14,9 @@ class Element {
   addEventListener(type,fn){this.listeners[type]=fn;}
   contains(node){return this===node||this.children.some(child=>child.contains(node));}
 }
-function harness(mode='native') {
+function harness(mode='native', frame=null) {
   const nodes=new Map(['view-replay','replay-overlays','replay-fullscreen','scrub-time-overlay','toast'].map(id=>[id,new Element()]));
+  if (frame) nodes.set('player-wrap', frame);
   let interrupts=0;
   const body=new Element(),view=nodes.get('view-replay'),overlays=nodes.get('replay-overlays'),listeners={},navigation=[];
   body.dataset={view:'replay'};body.append(view,overlays);overlays.append(...['scrub-time-overlay','toast'].map(id=>nodes.get(id)));
@@ -40,6 +41,53 @@ test('shared time/toast container is in the template and moves into native fulls
     assert.equal(h.nodes.get('replay-fullscreen').attrs['aria-label'],'退出全屏回放');
     await h.click();assert.equal(h.overlays.parentElement,h.body);assert.equal(h.document.fullscreenElement,null);assert.equal(h.body.children.filter(node=>node===h.overlays).length,1);
   }
+});
+test('a cancelled enter animation cannot drop the exit animation that replaced it', async () => {
+  let expanded = false;
+  const motions = [];
+  const frame = {
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    getBoundingClientRect() { return expanded ? { left: 0, top: 0, width: 800, height: 400 } : { left: 20, top: 40, width: 400, height: 200 }; },
+    animate() {
+      const listeners = {};
+      const motion = {
+        addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
+        cancel() { this.cancelled = true; queueMicrotask(() => listeners.cancel?.forEach(fn => fn())); },
+      };
+      motions.push(motion);
+      return motion;
+    },
+  };
+  const viewListeners = {};
+  const h = harness('rejected', frame);
+  const originalAdd = h.view.classList.add.bind(h.view.classList);
+  const originalRemove = h.view.classList.remove.bind(h.view.classList);
+  h.view.classList.add = name => { if (name === 'replay-expanded') expanded = true; originalAdd(name); };
+  h.view.classList.remove = name => { if (name === 'replay-expanded') expanded = false; originalRemove(name); };
+  h.view.classList.contains = name => name === 'replay-expanded' ? expanded : h.view.classes.has(name);
+  await h.click();
+  assert.equal(motions.length, 1);
+  h.listeners.keydown({ key: 'Escape' });
+  assert.equal(motions.length, 2);
+  assert.equal(motions[0].cancelled, true);
+  await new Promise(resolve => setImmediate(resolve));
+  h.listeners.keydown({ key: 'Escape' });
+  assert.equal(motions[1].cancelled, true, 'the replacement animation stays cancellable after the old cancel event');
+});
+test('mismatched fullscreen boxes switch directly instead of scaling only the width', async () => {
+  let expanded = false;
+  let animated = 0;
+  const frame = {
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    getBoundingClientRect() { return expanded ? { left: 0, top: 0, width: 430, height: 932 } : { left: 15, top: 160, width: 400, height: 225 }; },
+    animate() { animated++; return { addEventListener() {}, cancel() {} }; },
+  };
+  const h = harness('rejected', frame);
+  const originalAdd = h.view.classList.add.bind(h.view.classList);
+  h.view.classList.add = name => { if (name === 'replay-expanded') expanded = true; originalAdd(name); };
+  await h.click();
+  assert.equal(h.view.classList.contains('replay-expanded'), true);
+  assert.equal(animated, 0);
 });
 test('fullscreen continuity skips missing frames and still expands when native fullscreen is rejected',async()=>{
   const h=harness('rejected');await h.click();

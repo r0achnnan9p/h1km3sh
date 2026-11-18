@@ -74,4 +74,8 @@ test('桌面设置单独滚动，降低透明度盖过顶栏玻璃', () => {
   const reduce = css.lastIndexOf('@media (min-width: 1024px) and (prefers-reduced-transparency: reduce)');
   assert.ok(glass > 0 && reduce > glass, '降低透明度写在桌面顶栏玻璃之后');
   assert.match(css.slice(reduce), /\.precision-layout \.side-nav \{ background: var\(--surface\); -webkit-backdrop-filter: none; backdrop-filter: none; \}/);
+  const solid = css.lastIndexOf('@media (prefers-reduced-transparency: reduce) {');
+  assert.ok(solid > css.lastIndexOf('background: var(--glass-light);'));
+  assert.match(css.slice(solid), /\.precision-layout \.task-tabs,[\s\S]*\.empty-card \{ background: var\(--surface\)/);
+  assert.match(css.slice(solid), /\.task-tabs button\[aria-selected='true'\] \{ background: var\(--surface2\); \}/);
 });

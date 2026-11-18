@@ -2830,15 +2830,21 @@ function replayFrameBox() {
   return box.width > 1 && box.height > 1 ? box : null;
 }
 function cancelReplayFrameMotion() {
-  try { replayFrameMotion?.cancel(); } catch { /* finished */ }
+  const motion = replayFrameMotion;
   replayFrameMotion = null;
-  $('view-replay')?.classList?.remove('replay-frame-settling');
+  try { motion?.cancel(); } catch { /* finished */ }
+  if (replayFrameMotion === null) $('view-replay')?.classList?.remove('replay-frame-settling');
 }
 function settleReplayFrame(from) {
-  if (!from) return;
+  if (!from?.width || !from?.height) return;
   const frame = $('player-wrap');
   const to = frame?.getBoundingClientRect?.();
-  if (!to?.width || !to?.height) return;
+  if (!to?.width || !to?.height || typeof frame.animate !== 'function') return;
+  // Uniform scale can match both edges only when the two boxes share an aspect.
+  // A width-only scale of a 430×932 stage would start at the right width and the wrong height.
+  const fromAspect = from.width / from.height;
+  const toAspect = to.width / to.height;
+  if (!Number.isFinite(fromAspect) || !Number.isFinite(toAspect) || Math.abs(fromAspect - toAspect) / toAspect > 0.04) return;
   const scale = from.width / to.width;
   if (!Number.isFinite(scale) || scale <= 0) return;
   const dx = (from.left + from.width / 2) - (to.left + to.width / 2);
@@ -2846,13 +2852,18 @@ function settleReplayFrame(from) {
   if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(scale - 1) < 0.02) return;
   $('view-replay')?.classList?.add('replay-frame-settling');
   const expanding = scale < 1;
-  replayFrameMotion = frame.animate([
+  const motion = frame.animate([
     { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, borderRadius: expanding ? '20px' : '0px' },
     { transform: 'none', borderRadius: expanding ? '0px' : '20px' }
   ], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' });
-  const done = () => { if (replayFrameMotion) { replayFrameMotion = null; $('view-replay')?.classList?.remove('replay-frame-settling'); } };
-  replayFrameMotion.addEventListener?.('finish', done);
-  replayFrameMotion.addEventListener?.('cancel', done);
+  replayFrameMotion = motion;
+  const finish = () => {
+    if (replayFrameMotion !== motion) return;
+    replayFrameMotion = null;
+    $('view-replay')?.classList?.remove('replay-frame-settling');
+  };
+  motion.addEventListener?.('finish', finish);
+  motion.addEventListener?.('cancel', finish);
 }
 function syncReplayFullscreen() {
   const view = $('view-replay'), overlays = $('replay-overlays');
