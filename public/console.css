@@ -1434,6 +1434,10 @@ body.precision-layout[data-view='replay'] .connection-banner { flex:none; margin
 .precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded)[data-chrome-idle='true'] :is(.replay-topbar,.replay-control-panel) { opacity:0; pointer-events:none; }
 .precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) :is(.replay-topbar,.replay-control-panel):has(:focus-visible) { opacity:1; pointer-events:auto; }
 .precision-layout #view-replay.focus-replay.replay-frame-settling :is(.replay-topbar,.replay-selection-editor) { animation: motion-fade var(--dur) var(--ease) both; }
+.precision-layout #view-replay.focus-replay.replay-frame-settling .player-wrap { z-index: 5; }
+.precision-layout #view-replay.focus-replay.replay-frame-settling .player-wrap video,
+.precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) .player-wrap video { object-fit: contain; }
+.precision-layout #view-replay.focus-replay:is(:fullscreen,.replay-expanded) #replay-system-fullscreen { display: inline-grid; min-width: 44px; min-height: 44px; padding-inline: 12px; border-radius: var(--radius-pill); }
 @media (max-width:1023px) {
   .standalone-viewport .precision-layout #view-replay.focus-replay.replay-expanded { position:absolute; inset:0 0 auto; height:var(--app-viewport-height); }
 }

@@ -339,7 +339,7 @@ test('transport HTML supplies Chinese accessible labels, icon visuals and 44px t
   const html = statusDashboardPage();
   const expected = new Map([
     ['go-live', '回到直播'], ['transport-toggle', '播放回放'], ['playback-mute', '开启声音'],
-    ['replay-fullscreen', '全屏回放'], ['previous-day', '前一天'], ['next-day', '后一天'],
+    ['replay-fullscreen', '沉浸回放'], ['previous-day', '前一天'], ['next-day', '后一天'],
     ['skip-back', '后退 10 秒，长按连续后退'], ['skip-forward', '前进 10 秒，长按连续前进'],
   ]);
   for (const [id, label] of expected) {

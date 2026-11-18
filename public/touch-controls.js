@@ -343,7 +343,7 @@ export function mountCalendar(parent, { value, today, onSelect }) {
       dayButtons.set(date, button);
     }
   }
-  addButton(wrap, '今天', 'quiet-button', () => choose(today()));
+  addButton(wrap, '今天', 'primary-button', () => choose(today()));
   input.addEventListener('change', () => choose(input.value));
   bindEnterConfirm(input, () => choose(input.value));
   grid.addEventListener('keydown', event => {

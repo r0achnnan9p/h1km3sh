@@ -505,7 +505,7 @@ test('standalone viewport geometry remains visible during resize and stable duri
   await b.evaluate(`document.querySelector('.mobile-nav button[data-view="replay"]').click()`); await sleep(100);
   assert.equal(await b.evaluate(`document.documentElement.classList.contains('standalone-viewport')`),true,'narrow landscape also follows visible nav bounds');
   await device(430,932);
-  await b.send('Runtime.evaluate',{expression:`document.getElementById('replay-fullscreen').click()`,userGesture:true,awaitPromise:true});
+  await b.send('Runtime.evaluate',{expression:`document.getElementById('replay-system-fullscreen').click()`,userGesture:true,awaitPromise:true});
   await sleep(100);
   for(let i=0;i<40 && !await b.evaluate(`!!document.fullscreenElement`);i++) await sleep(50);
   assert.equal(await b.evaluate(`!!document.fullscreenElement`),true,'browser really entered fullscreen');
@@ -1191,59 +1191,85 @@ test('css fullscreen grows the same player back to its place without fading the 
   assert.equal(back.paused, before.paused);
   assert.equal(back.time, before.time);
   await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await sleep(50);
   await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
   await sleep(40);
-  const reduced = await b.evaluate(`document.getElementById('player-wrap').getAnimations().length`);
-  assert.equal(reduced, 0);
+  const reduced = await b.evaluate(`({ matches: matchMedia('(prefers-reduced-motion: reduce)').matches, animations: document.getElementById('player-wrap').getAnimations().length })`);
+  assert.equal(reduced.matches, true);
+  assert.equal(reduced.animations, 0);
   await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
 });
 
-test('css fullscreen first frame matches the old picture or does not scale a mismatched box', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+test('portrait immersion morphs both edges and keeps the picture contained', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
   const res = createResources(); t.after(() => res.closeAll());
   const server = await startFixture(res), b = await launch(res);
   await b.send('Page.enable'); await b.send('Runtime.enable');
+  const containBox = (box) => {
+    const aspect = 16 / 9;
+    const boxAspect = box.w / box.h;
+    if (boxAspect > aspect) { const h = box.h, w = h * aspect; return { w, h }; }
+    const w = box.w, h = w / aspect; return { w, h };
+  };
   const check = async (width, height) => {
-    await b.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
-    await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal&safeArea=${height > width ? 'iphone' : 'landscape'}#replay` });
+    await b.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 800 });
+    await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal&safeArea=${height > width ? 'iphone' : width > height ? 'landscape' : 'none'}#replay` });
     for (let i = 0; i < 80 && !await b.evaluate(`document.getElementById('preview-state-title')?.textContent !== '尚未载入画面'`); i++) await sleep(100);
-    if (width > height) {
+    if (width > height && height <= 540) {
       await b.evaluate(`document.getElementById('player-wrap').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:1,pointerType:'touch',isPrimary:true,clientX:80,clientY:40}))`);
       await sleep(200);
     }
-    await b.evaluate(`document.getElementById('view-replay').requestFullscreen = async () => { throw new Error('native fullscreen off'); };`);
     const sample = await b.evaluate(`(() => {
       const frame = document.getElementById('player-wrap');
+      const video = document.getElementById('replay-player');
       const before = frame.getBoundingClientRect();
+      const state = { paused: video.paused, time: video.currentTime, id: video.id };
       document.getElementById('replay-fullscreen').click();
-      const now = frame.getBoundingClientRect();
-      const running = frame.getAnimations().some(item => item.playState === 'running');
-      return { before: { w: before.width, h: before.height }, now: { w: now.width, h: now.height }, running };
+      const anim = frame.getAnimations().find(item => item.playState === 'running');
+      if (!anim) return { state, before: { w: before.width, h: before.height }, running: false };
+      anim.pause();
+      anim.currentTime = 0;
+      const first = frame.getBoundingClientRect();
+      anim.currentTime = 140;
+      const mid = frame.getBoundingClientRect();
+      anim.currentTime = 280;
+      const last = frame.getBoundingClientRect();
+      anim.play();
+      return { state, running: true, fit: getComputedStyle(video).objectFit, before: { w: before.width, h: before.height }, first: { w: first.width, h: first.height }, mid: { w: mid.width, h: mid.height }, last: { w: last.width, h: last.height } };
     })()`);
-    if (sample.running) {
-      assert.ok(Math.abs(sample.now.w - sample.before.w) < 3 && Math.abs(sample.now.h - sample.before.h) < 3, JSON.stringify(sample));
-    } else {
-      const wrongHeight = Math.abs(sample.now.w - sample.before.w) < 3 && Math.abs(sample.now.h - sample.before.h) > 20;
-      assert.equal(wrongHeight, false, JSON.stringify(sample));
+    if (!sample.running) {
+      assert.ok(Math.abs(sample.before.w - width) < 40 && Math.abs(sample.before.h - height) < 40, JSON.stringify(sample));
+      await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+      return sample;
     }
+    assert.equal(sample.fit, 'contain');
+    assert.ok(Math.abs(sample.first.w - sample.before.w) < 3 && Math.abs(sample.first.h - sample.before.h) < 3, JSON.stringify(sample));
+    const picture = [sample.first, sample.mid, sample.last].map(containBox);
+    const pictureAspect = picture.map(box => box.w / box.h);
+    assert.ok(pictureAspect.every(aspect => Math.abs(aspect - 16 / 9) < 0.02), JSON.stringify(pictureAspect));
+    const growing = sample.last.h > sample.first.h + 30;
+    if (growing) assert.ok(sample.mid.h > sample.first.h + 10 && sample.mid.h < sample.last.h - 10, JSON.stringify(sample));
     await sleep(360);
-    const end = await b.evaluate(`(() => { const frame = document.getElementById('player-wrap'); const box = frame.getBoundingClientRect(); return { w: box.width, h: box.height, running: frame.getAnimations().some(item => item.playState === 'running'), expanded: document.getElementById('view-replay').classList.contains('replay-expanded') }; })()`);
-    assert.equal(end.expanded, true);
-    assert.equal(end.running, false);
     const back = await b.evaluate(`(() => {
       const frame = document.getElementById('player-wrap');
-      const before = frame.getBoundingClientRect();
+      const video = document.getElementById('replay-player');
+      const full = frame.getBoundingClientRect();
       document.getElementById('replay-fullscreen').click();
-      const now = frame.getBoundingClientRect();
-      const running = frame.getAnimations().some(item => item.playState === 'running');
-      return { before: { w: before.width, h: before.height }, now: { w: now.width, h: now.height }, running };
+      const anim = frame.getAnimations().find(item => item.playState === 'running');
+      anim.pause(); anim.currentTime = 0; const first = frame.getBoundingClientRect();
+      anim.currentTime = 280; const last = frame.getBoundingClientRect();
+      return { full: { w: full.width, h: full.height }, first: { w: first.width, h: first.height }, last: { w: last.width, h: last.height }, paused: video.paused, time: video.currentTime, fit: getComputedStyle(video).objectFit };
     })()`);
-    if (back.running) assert.ok(Math.abs(back.now.w - sample.before.w) < 3 && Math.abs(back.now.h - sample.before.h) < 3, JSON.stringify(back));
-    await sleep(360);
-    assert.equal(await b.evaluate(`document.getElementById('view-replay').classList.contains('replay-expanded')`), false);
-    return end;
+    assert.ok(Math.abs(back.first.w - back.full.w) < 3 && Math.abs(back.first.h - back.full.h) < 3, JSON.stringify(back));
+    assert.ok(Math.abs(back.last.w - sample.before.w) <= Math.max(12, sample.before.w * 0.08) && Math.abs(back.last.h - sample.before.h) <= Math.max(12, sample.before.h * 0.08), JSON.stringify({ ...back, before: sample.before }));
+    assert.equal(back.fit, 'contain');
+    assert.equal(back.paused, sample.state.paused);
+    assert.equal(back.time, sample.state.time);
+    await sleep(40);
+    return sample;
   };
   await check(430, 932);
   await check(932, 430);
+  await check(1440, 900);
   await b.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] });
   await b.evaluate(`document.querySelector('.mobile-nav button[data-view="library"]').click()`);

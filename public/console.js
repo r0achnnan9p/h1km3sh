@@ -1867,7 +1867,7 @@ function makeTaskCard(task, uploadTask) {
     footer.append(cancel);
   }
   if (task.provider === 'cloud189' && task.status === 'unknown' && !task.archivedAt) {
-    const verify = document.createElement('button'); verify.type = 'button'; verify.className = 'quiet-button';
+    const verify = document.createElement('button'); verify.type = 'button'; verify.className = 'primary-button';
     verify.disabled = cloudVerificationPending.has(task.id);
     verify.textContent = verify.disabled ? '正在核实…' : '核实结果';
     verify.addEventListener('click', async () => {
@@ -1955,7 +1955,7 @@ function makeDvrHttpSampleCard(task) {
   const footer = document.createElement('div'); footer.className = 'task-footer';
   const kind = document.createElement('span'); kind.textContent = 'HTTP 兼容性报告'; footer.append(kind);
   if (Object.getOwnPropertyDescriptor(task, 'sampleResumeAvailable')?.value === true) {
-    const resume = document.createElement('button'); resume.type = 'button'; resume.className = 'quiet-button'; resume.textContent = '继续未开始的测试';
+    const resume = document.createElement('button'); resume.type = 'button'; resume.className = 'primary-button'; resume.textContent = '继续未开始的测试';
     resume.disabled = dvrHttpSamplePending.has(task.taskId);
     resume.addEventListener('click', () => { if (resume.disabled) return; resume.disabled = true; return startDvrHttpSample(task); }); footer.append(resume);
   }
@@ -2825,46 +2825,42 @@ function replayMotionReduced() {
 }
 function replayFrameBox() {
   const frame = $('player-wrap');
-  if (!frame || typeof frame.getBoundingClientRect !== 'function' || typeof frame.animate !== 'function' || replayMotionReduced()) return null;
+  if (!frame || typeof frame.getBoundingClientRect !== 'function') return null;
   const box = frame.getBoundingClientRect();
-  return box.width > 1 && box.height > 1 ? box : null;
+  return box.width > 1 && box.height > 1 ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
 }
 function cancelReplayFrameMotion() {
   const motion = replayFrameMotion;
   replayFrameMotion = null;
   try { motion?.cancel(); } catch { /* finished */ }
+  const frame = $('player-wrap');
+  if (frame?.style) { frame.style.position = ''; frame.style.left = ''; frame.style.top = ''; frame.style.width = ''; frame.style.height = ''; frame.style.right = ''; frame.style.bottom = ''; }
   if (replayFrameMotion === null) $('view-replay')?.classList?.remove('replay-frame-settling');
 }
-function settleReplayFrame(from) {
-  if (!from?.width || !from?.height) return;
+// The frame's rectangle interpolates on both axes. The video stays object-fit:contain inside it,
+// so a 225px-tall card can grow into a 932px-tall stage without stretching or cropping the picture.
+function morphReplayFrame(from, to) {
   const frame = $('player-wrap');
-  const to = frame?.getBoundingClientRect?.();
-  if (!to?.width || !to?.height || typeof frame.animate !== 'function') return;
-  // Uniform scale can match both edges only when the two boxes share an aspect.
-  // A width-only scale of a 430×932 stage would start at the right width and the wrong height.
-  const fromAspect = from.width / from.height;
-  const toAspect = to.width / to.height;
-  if (!Number.isFinite(fromAspect) || !Number.isFinite(toAspect) || Math.abs(fromAspect - toAspect) / toAspect > 0.04) return;
-  const scale = from.width / to.width;
-  if (!Number.isFinite(scale) || scale <= 0) return;
-  const dx = (from.left + from.width / 2) - (to.left + to.width / 2);
-  const dy = (from.top + from.height / 2) - (to.top + to.height / 2);
-  if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(scale - 1) < 0.02) return;
+  if (!from || !to || replayMotionReduced() || typeof frame?.animate !== 'function') return;
+  if (Math.abs(from.left - to.left) < 1 && Math.abs(from.top - to.top) < 1 && Math.abs(from.width - to.width) < 1 && Math.abs(from.height - to.height) < 1) return;
+  if (frame.style) { frame.style.position = 'fixed'; frame.style.right = 'auto'; frame.style.bottom = 'auto'; frame.style.margin = '0'; }
   $('view-replay')?.classList?.add('replay-frame-settling');
-  const expanding = scale < 1;
   const motion = frame.animate([
-    { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, borderRadius: expanding ? '20px' : '0px' },
-    { transform: 'none', borderRadius: expanding ? '0px' : '20px' }
-  ], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: '20px' },
+    { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, borderRadius: '0px' }
+  ], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'both' });
   replayFrameMotion = motion;
   const finish = () => {
     if (replayFrameMotion !== motion) return;
     replayFrameMotion = null;
+    if (frame.style) { frame.style.position = ''; frame.style.left = ''; frame.style.top = ''; frame.style.width = ''; frame.style.height = ''; frame.style.right = ''; frame.style.bottom = ''; frame.style.margin = ''; }
     $('view-replay')?.classList?.remove('replay-frame-settling');
+    try { motion.cancel(); } catch { /* already finished */ }
   };
   motion.addEventListener?.('finish', finish);
   motion.addEventListener?.('cancel', finish);
 }
+if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('resize', () => { if (replayFrameMotion) cancelReplayFrameMotion(); });
 function syncReplayFullscreen() {
   const view = $('view-replay'), overlays = $('replay-overlays');
   const active = document.body.dataset.view === 'replay';
@@ -2872,7 +2868,13 @@ function syncReplayFullscreen() {
   const expanded = active && (document.fullscreenElement === view || view.classList.contains('replay-expanded'));
   const parent = expanded ? view : replayOverlayHome;
   if (overlays && parent && overlays.parentElement !== parent) parent.append(overlays);
-  $('replay-fullscreen')?.setAttribute('aria-label', expanded ? '退出全屏回放' : '全屏回放');
+  $('replay-fullscreen')?.setAttribute('aria-label', (view.classList.contains('replay-expanded') || document.fullscreenElement === view) ? '退出沉浸回放' : '沉浸回放');
+  const system = $('replay-system-fullscreen');
+  if (system) {
+    const native = document.fullscreenElement === view;
+    system.hidden = !(view.classList.contains('replay-expanded') || native);
+    system.setAttribute('aria-label', native ? '退出系统全屏' : '进入系统全屏');
+  }
   if (typeof syncReplayControls === 'function') syncReplayControls();
 }
 function cancelReplayFullscreenEntry() {
@@ -2881,19 +2883,17 @@ function cancelReplayFullscreenEntry() {
   replayFullscreenGeneration++; replayFullscreenWanted = false;
   cancelReplayFrameMotion();
   view.classList.remove('replay-expanded'); syncReplayFullscreen();
-  if (from) settleReplayFrame(from);
+  if (from) morphReplayFrame(from, replayFrameBox());
 }
 function leaveReplayFullscreen() {
   interruptTimelineScrub();
   cancelReplayFullscreenEntry();
   if (replayFullscreenExit) return replayFullscreenExit;
   if (document.fullscreenElement !== $('view-replay')) return Promise.resolve(true);
-  const from = replayFrameBox();
   replayFullscreenExit = (async () => {
     try {
       await document.exitFullscreen();
       const left = document.fullscreenElement !== $('view-replay');
-      if (left) settleReplayFrame(from);
       return left;
     }
     catch { return false; }
@@ -2908,23 +2908,31 @@ $('replay-fullscreen')?.addEventListener('click', async () => {
   const view = $('view-replay');
   const generation = ++replayFullscreenGeneration;
   try {
-    if (document.fullscreenElement === view || view.classList.contains('replay-expanded')) await leaveReplayFullscreen();
+    if (view.classList.contains('replay-expanded')) cancelReplayFullscreenEntry();
+    else if (document.fullscreenElement === view) await leaveReplayFullscreen();
     else {
-      replayFullscreenWanted = true;
       const from = replayFrameBox();
-      if (view.requestFullscreen) {
-        try {
-          await view.requestFullscreen();
-          if (generation === replayFullscreenGeneration && document.fullscreenElement === view) {
-            view.classList.add('replay-frame-settling');
-            setTimeout(() => { if (document.fullscreenElement === view) view.classList.remove('replay-frame-settling'); }, 240);
-          }
-        }
-        catch { if (generation === replayFullscreenGeneration && document.body.dataset.view === 'replay') { view.classList.add('replay-expanded'); settleReplayFrame(from); } }
-      } else { view.classList.add('replay-expanded'); settleReplayFrame(from); }
-      // A request can settle after navigation/Escape; never resurrect the old replay session.
-      if (generation !== replayFullscreenGeneration || document.body.dataset.view !== 'replay') await leaveReplayFullscreen();
+      view.classList.add('replay-expanded');
+      syncReplayFullscreen();
+      if (generation === replayFullscreenGeneration && document.body.dataset.view === 'replay') morphReplayFrame(from, replayFrameBox());
+      else { view.classList.remove('replay-expanded'); syncReplayFullscreen(); }
     }
+  } finally { replayFullscreenPending = false; syncReplayFullscreen(); }
+});
+$('replay-system-fullscreen')?.addEventListener('click', async () => {
+  if (replayFullscreenPending || replayFullscreenExit || document.body.dataset.view !== 'replay') return;
+  interruptTimelineScrub();
+  const view = $('view-replay');
+  if (document.fullscreenElement === view) { await leaveReplayFullscreen(); return; }
+  replayFullscreenPending = true;
+  replayFullscreenWanted = true;
+  const generation = ++replayFullscreenGeneration;
+  try {
+    if (typeof view.requestFullscreen === 'function') {
+      try { await view.requestFullscreen(); }
+      catch { /* The browser refused. Web immersion remains the smooth path. */ }
+    }
+    if ((generation !== replayFullscreenGeneration || document.body.dataset.view !== 'replay') && document.fullscreenElement === view) await leaveReplayFullscreen();
   } finally { replayFullscreenPending = false; syncReplayFullscreen(); }
 });
 document.addEventListener('fullscreenchange', () => {
