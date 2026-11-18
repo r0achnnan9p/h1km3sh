@@ -2815,8 +2815,45 @@ syncTimelineZoomButtons();
 boot();
 
 // Move shared overlays into the fullscreen subtree; top-layer membership cannot be fixed with z-index.
+// Native fullscreen is the browser's own transition: request it inside the click, then only fade the
+// source bar and selection. The CSS fallback grows the same player from its current rectangle.
 const replayOverlayHome = $('replay-overlays')?.parentElement;
-let replayFullscreenPending = false, replayFullscreenGeneration = 0, replayFullscreenWanted = false, replayFullscreenExit = null;
+let replayFullscreenPending = false, replayFullscreenGeneration = 0, replayFullscreenWanted = false, replayFullscreenExit = null, replayFrameMotion = null;
+function replayMotionReduced() {
+  try { return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch { return true; }
+}
+function replayFrameBox() {
+  const frame = $('player-wrap');
+  if (!frame || typeof frame.getBoundingClientRect !== 'function' || typeof frame.animate !== 'function' || replayMotionReduced()) return null;
+  const box = frame.getBoundingClientRect();
+  return box.width > 1 && box.height > 1 ? box : null;
+}
+function cancelReplayFrameMotion() {
+  try { replayFrameMotion?.cancel(); } catch { /* finished */ }
+  replayFrameMotion = null;
+  $('view-replay')?.classList?.remove('replay-frame-settling');
+}
+function settleReplayFrame(from) {
+  if (!from) return;
+  const frame = $('player-wrap');
+  const to = frame?.getBoundingClientRect?.();
+  if (!to?.width || !to?.height) return;
+  const scale = from.width / to.width;
+  if (!Number.isFinite(scale) || scale <= 0) return;
+  const dx = (from.left + from.width / 2) - (to.left + to.width / 2);
+  const dy = (from.top + from.height / 2) - (to.top + to.height / 2);
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(scale - 1) < 0.02) return;
+  $('view-replay')?.classList?.add('replay-frame-settling');
+  const expanding = scale < 1;
+  replayFrameMotion = frame.animate([
+    { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, borderRadius: expanding ? '20px' : '0px' },
+    { transform: 'none', borderRadius: expanding ? '0px' : '20px' }
+  ], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  const done = () => { if (replayFrameMotion) { replayFrameMotion = null; $('view-replay')?.classList?.remove('replay-frame-settling'); } };
+  replayFrameMotion.addEventListener?.('finish', done);
+  replayFrameMotion.addEventListener?.('cancel', done);
+}
 function syncReplayFullscreen() {
   const view = $('view-replay'), overlays = $('replay-overlays');
   const active = document.body.dataset.view === 'replay';
@@ -2828,16 +2865,26 @@ function syncReplayFullscreen() {
   if (typeof syncReplayControls === 'function') syncReplayControls();
 }
 function cancelReplayFullscreenEntry() {
+  const view = $('view-replay');
+  const from = view.classList.contains('replay-expanded') && document.fullscreenElement !== view ? replayFrameBox() : null;
   replayFullscreenGeneration++; replayFullscreenWanted = false;
-  $('view-replay').classList.remove('replay-expanded'); syncReplayFullscreen();
+  cancelReplayFrameMotion();
+  view.classList.remove('replay-expanded'); syncReplayFullscreen();
+  if (from) settleReplayFrame(from);
 }
 function leaveReplayFullscreen() {
   interruptTimelineScrub();
   cancelReplayFullscreenEntry();
   if (replayFullscreenExit) return replayFullscreenExit;
   if (document.fullscreenElement !== $('view-replay')) return Promise.resolve(true);
+  const from = replayFrameBox();
   replayFullscreenExit = (async () => {
-    try { await document.exitFullscreen(); return document.fullscreenElement !== $('view-replay'); }
+    try {
+      await document.exitFullscreen();
+      const left = document.fullscreenElement !== $('view-replay');
+      if (left) settleReplayFrame(from);
+      return left;
+    }
     catch { return false; }
     finally { replayFullscreenExit = null; syncReplayFullscreen(); }
   })();
@@ -2853,10 +2900,17 @@ $('replay-fullscreen')?.addEventListener('click', async () => {
     if (document.fullscreenElement === view || view.classList.contains('replay-expanded')) await leaveReplayFullscreen();
     else {
       replayFullscreenWanted = true;
+      const from = replayFrameBox();
       if (view.requestFullscreen) {
-        try { await view.requestFullscreen(); }
-        catch { if (generation === replayFullscreenGeneration && document.body.dataset.view === 'replay') view.classList.add('replay-expanded'); }
-      } else view.classList.add('replay-expanded');
+        try {
+          await view.requestFullscreen();
+          if (generation === replayFullscreenGeneration && document.fullscreenElement === view) {
+            view.classList.add('replay-frame-settling');
+            setTimeout(() => { if (document.fullscreenElement === view) view.classList.remove('replay-frame-settling'); }, 240);
+          }
+        }
+        catch { if (generation === replayFullscreenGeneration && document.body.dataset.view === 'replay') { view.classList.add('replay-expanded'); settleReplayFrame(from); } }
+      } else { view.classList.add('replay-expanded'); settleReplayFrame(from); }
       // A request can settle after navigation/Escape; never resurrect the old replay session.
       if (generation !== replayFullscreenGeneration || document.body.dataset.view !== 'replay') await leaveReplayFullscreen();
     }

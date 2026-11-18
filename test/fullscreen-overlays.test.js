@@ -41,6 +41,13 @@ test('shared time/toast container is in the template and moves into native fulls
     await h.click();assert.equal(h.overlays.parentElement,h.body);assert.equal(h.document.fullscreenElement,null);assert.equal(h.body.children.filter(node=>node===h.overlays).length,1);
   }
 });
+test('fullscreen continuity skips missing frames and still expands when native fullscreen is rejected',async()=>{
+  const h=harness('rejected');await h.click();
+  assert.equal(h.view.classList.contains('replay-expanded'),true);
+  assert.equal(h.nodes.get('replay-player'),undefined);
+  h.listeners.keydown({key:'Escape'});
+  assert.equal(h.view.classList.contains('replay-expanded'),false);
+});
 test('unsupported or rejected native fullscreen uses CSS expansion with overlays inside and Escape restores',async()=>{
   for(const mode of ['unsupported','rejected']) {
     const h=harness(mode);await h.click();assert.equal(h.view.classList.contains('replay-expanded'),true);assert.equal(h.overlays.parentElement,h.view);

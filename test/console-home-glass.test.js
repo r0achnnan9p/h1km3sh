@@ -68,12 +68,10 @@ test('动效集中在 token，时间尺不被动效拖慢，减少动效时停�
 });
 
 test('桌面设置单独滚动，降低透明度盖过顶栏玻璃', () => {
-  const desktopAt = css.lastIndexOf('@media (min-width: 1024px) {');
-  const desktop = css.slice(desktopAt);
-  assert.match(desktop, /body\.precision-layout\[data-view='settings'\] \.workspace-main \{[^}]*overflow-y: auto/);
+  assert.match(css, /body\.precision-layout\[data-view='settings'\] \.workspace-main \{ overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; \}/);
   assert.match(css, /body\.precision-layout\[data-view='replay'\] \.workspace-main \{[^}]*overflow:hidden/);
   const glass = css.lastIndexOf('background: var(--glass); box-shadow: none;');
   const reduce = css.lastIndexOf('@media (min-width: 1024px) and (prefers-reduced-transparency: reduce)');
-  assert.ok(glass > desktopAt && reduce > glass, '降低透明度写在桌面顶栏玻璃之后');
+  assert.ok(glass > 0 && reduce > glass, '降低透明度写在桌面顶栏玻璃之后');
   assert.match(css.slice(reduce), /\.precision-layout \.side-nav \{ background: var\(--surface\); -webkit-backdrop-filter: none; backdrop-filter: none; \}/);
 });

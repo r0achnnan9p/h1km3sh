@@ -1155,3 +1155,45 @@ test('short desktop settings scroll to the cover save control and the top nav ho
   assert.equal(glass.background, 'rgba(186, 214, 247, 0.12)');
   assert.match(glass.filter, /blur/);
 });
+
+test('css fullscreen grows the same player back to its place without fading the page', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const res = createResources(); t.after(() => res.closeAll());
+  const server = await startFixture(res), b = await launch(res);
+  await b.send('Page.enable'); await b.send('Runtime.enable');
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal#replay` });
+  for (let i = 0; i < 100 && !await b.evaluate(`document.getElementById('preview-state-title')?.textContent && document.getElementById('preview-state-title').textContent !== '尚未载入画面'`); i++) await sleep(100);
+  await sleep(300);
+  const before = await b.evaluate(`(() => { const video=document.getElementById('replay-player'); return { paused: video.paused, time: video.currentTime }; })()`);
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(40);
+  const during = await b.evaluate(`(() => {
+    const view=document.getElementById('view-replay');
+    const frame=document.getElementById('player-wrap');
+    const video=document.getElementById('replay-player');
+    return { expanded: view.classList.contains('replay-expanded') || document.fullscreenElement === view, same: video.id === 'replay-player', paused: video.paused, time: video.currentTime, pageFade: view.getAnimations().some(item => item.animationName === 'motion-view' && item.playState === 'running') };
+  })()`);
+  assert.equal(during.expanded, true);
+  assert.equal(during.same, true);
+  assert.equal(during.paused, before.paused);
+  assert.equal(during.time, before.time);
+  assert.equal(during.pageFade, false);
+  await sleep(360);
+  const settled = await b.evaluate(`(() => { const frame=document.getElementById('player-wrap'); const view=document.getElementById('view-replay'); return { transform: getComputedStyle(frame).transform, running: frame.getAnimations().some(item => item.playState === 'running'), expanded: view.classList.contains('replay-expanded') || document.fullscreenElement === view }; })()`);
+  assert.equal(settled.expanded, true);
+  assert.equal(settled.running, false);
+  assert.equal(settled.transform, 'none');
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(360);
+  const back = await b.evaluate(`(() => { const view=document.getElementById('view-replay'); const video=document.getElementById('replay-player'); return { expanded: view.classList.contains('replay-expanded'), fullscreen: document.fullscreenElement === view, paused: video.paused, time: video.currentTime }; })()`);
+  assert.equal(back.expanded, false);
+  assert.equal(back.fullscreen, false);
+  assert.equal(back.paused, before.paused);
+  assert.equal(back.time, before.time);
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+  await sleep(40);
+  const reduced = await b.evaluate(`document.getElementById('player-wrap').getAnimations().length`);
+  assert.equal(reduced, 0);
+  await b.evaluate(`document.getElementById('replay-fullscreen').click()`);
+});
