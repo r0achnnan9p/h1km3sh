@@ -459,6 +459,10 @@ function updatePreviewPlaceholder(title, help) {
   const heading = $('preview-state-title'), description = $('preview-state-help');
   heading.textContent = title;
   description.textContent = help;
+  const placeholder = $('player-placeholder');
+  const text = String(title);
+  const placeholderState = text.includes('失败') ? 'error' : text.startsWith('正在') ? 'loading' : (text.includes('没有') || text.includes('尚未')) ? 'empty' : 'ready';
+  if (placeholder?.dataset) placeholder.dataset.state = placeholderState;
 }
 function segmentBounds(segment) { const start = Date.parse(segment.start); return { start, end: start + Number(segment.duration) * 1000 }; }
 function timelineWindow() {
@@ -709,10 +713,22 @@ function updateSelection() {
   const exportButton = $('export-range'), selectionHelp = $('selection-help');
   exportButton.disabled = !valid || !hasPlaybackSelection() || state.busy;
   const cancel = $('cancel-export'); if (cancel) cancel.hidden = !state.busy;
-  exportButton.title = valid ? '' : '请先设置有效的入点和出点';
-  selectionHelp.classList.remove('warning');
-  selectionHelp.textContent = state.playbackSource === 'dvr' && !hasPlaybackSelection() ? '先选择录像机和通道。' : '';
-  selectionHelp.hidden = !selectionHelp.textContent;
+  // Kept inside this function so sliced console tests can run it without the module graph.
+  function replaySelectionCue({ needsChannel = false, inMs = null, outMs = null } = {}) {
+    if (needsChannel) return { text: '先选择录像机和通道。', tone: '' };
+    if (inMs === null && outMs === null) return { text: '先标记入点，再标记出点。', tone: '' };
+    if (inMs === null) return { text: '再标记入点即可导出。', tone: '' };
+    if (outMs === null) return { text: '再标记出点即可导出。', tone: '' };
+    if (!(outMs > inMs)) return { text: '出点需要晚于入点。', tone: 'warning' };
+    return { text: '', tone: 'ready' };
+  }
+  const cue = replaySelectionCue({ needsChannel: state.playbackSource === 'dvr' && !hasPlaybackSelection(), inMs, outMs });
+  exportButton.title = cue.tone === 'ready' ? '导出当前入点到出点' : cue.text;
+  selectionHelp.classList.toggle('warning', cue.tone === 'warning');
+  selectionHelp.textContent = cue.text;
+  selectionHelp.hidden = !cue.text;
+  const editor = $('replay-selection-editor');
+  if (editor?.dataset) editor.dataset.selection = cue.tone === 'ready' ? 'ready' : (inMs !== null || outMs !== null) ? 'partial' : 'empty';
   if (inMs === null || outMs === null || outMs <= inMs) { overlay.hidden = true; $('overview-selection').hidden = true; return; }
   const window = timelineWindow(), start = Math.max(inMs, window.start), end = Math.min(outMs, window.end);
   overlay.hidden = end <= start;
@@ -1441,7 +1457,7 @@ async function submitExportSelection(selection, acceptGaps = false) {
   if (!isExportSelectionCurrent(selection)) { notify('日期、通道或入出点已改变，请重新确认当前选段。', true); return false; }
   const button = $('export-range'), pending = { controller: new AbortController(), session: consoleSession, silent: false, timedOut: false };
   exportSubmission = pending;
-  state.busy = true; button.disabled = true; button.textContent = '正在核验…'; updateSelection();
+  state.busy = true; button.disabled = true; button.textContent = '正在核验…'; button.setAttribute?.('aria-busy', 'true'); updateSelection();
   const timer = setTimeout(() => { pending.timedOut = true; pending.controller.abort(); }, 20000);
   let newCoverage;
   try {
@@ -1466,6 +1482,7 @@ async function submitExportSelection(selection, acceptGaps = false) {
     clearTimeout(timer);
     if (exportSubmission === pending) exportSubmission = null;
     state.busy = false;
+    button.removeAttribute?.('aria-busy');
     if (!button.classList.contains('submitted')) { setButtonIcon(button, 'download', '导出选中片段'); button.append('导出'); }
     updateSelection();
   }

@@ -981,3 +981,177 @@ test('signed results pause in the background and retain the focused file when it
   await sleep(100);
   assert.equal(requests, 3, 'terminal results must not restart polling');
 });
+
+test('iPhone 14 Pro Max replay keeps the export cue, safe landscape chrome and a reachable date sheet', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const b = await setup(t);
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 430, height: 932, deviceScaleFactor: 1, mobile: true });
+  await b.evaluate(`document.documentElement.style.setProperty('--safe-top','59px');document.documentElement.style.setProperty('--safe-bottom','34px');`);
+  const portrait = await b.evaluate(`(() => {
+    const help = document.getElementById('selection-help');
+    const button = document.getElementById('export-range');
+    const doc = document.documentElement;
+    return { help: help.textContent, hidden: help.hidden, disabled: button.disabled,
+      overflow: doc.scrollWidth > doc.clientWidth + 1,
+      cueColor: getComputedStyle(button).backgroundColor };
+  })()`);
+  assert.equal(portrait.help, '先标记入点，再标记出点。');
+  assert.equal(portrait.hidden, false);
+  assert.equal(portrait.disabled, true);
+  assert.equal(portrait.overflow, false, '竖屏不能横向溢出');
+  assert.notEqual(portrait.cueColor, 'rgba(0, 0, 0, 0)');
+
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 932, height: 430, deviceScaleFactor: 1, mobile: true });
+  await b.evaluate(`const root=document.documentElement; root.style.setProperty('--safe-top','0px'); root.style.setProperty('--safe-bottom','21px'); root.style.setProperty('--safe-left','59px'); root.style.setProperty('--safe-right','59px');`);
+  await sleep(200);
+  const landscape = await b.evaluate(`(() => {
+    const title = document.getElementById('preview-state-title').getBoundingClientRect();
+    const panel = document.getElementById('replay-control-panel').getBoundingClientRect();
+    const filter = getComputedStyle(document.getElementById('replay-control-panel')).backdropFilter;
+    return { titleBottom: title.bottom, panelTop: panel.top, filter, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 };
+  })()`);
+  assert.ok(landscape.titleBottom <= landscape.panelTop + 1, `横屏状态应留在控制面上方 ${landscape.titleBottom} <= ${landscape.panelTop}`);
+  assert.equal(landscape.filter, 'none', '画面上的控制面不能模糊');
+  assert.equal(landscape.overflow, false, '横屏不能横向溢出');
+
+  await tap(b, { x: 466, y: 40 });
+  await sleep(300);
+  await b.evaluate(`const dateTrigger = document.getElementById('playback-context'); dateTrigger.focus(); dateTrigger.click();`);
+  await sleep(300);
+  const sheet = await b.evaluate(`(() => {
+    const dialog = document.querySelector('dialog[open]');
+    const box = dialog.getBoundingClientRect();
+    const grid = dialog.querySelector('.calendar-grid');
+    const day = [...dialog.querySelectorAll('.calendar-day')].find(node => node.textContent === '28');
+    day.scrollIntoView({ block: 'nearest' });
+    const today = [...dialog.querySelectorAll('button')].find(node => node.textContent === '今天');
+    const dayBox = day.getBoundingClientRect();
+    const todayBox = today.getBoundingClientRect();
+    return {
+      left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+      dayTop: dayBox.top, dayBottom: dayBox.bottom, dayHeight: dayBox.height,
+      todayTop: todayBox.top, todayBottom: todayBox.bottom, todayHeight: todayBox.height,
+      gridScroll: grid.scrollHeight > grid.clientHeight
+    };
+  })()`);
+  assert.ok(sheet.left >= 59 - 1 && sheet.right <= 932 - 59 + 1, `日期弹层让出横屏刘海 ${JSON.stringify(sheet)}`);
+  assert.ok(sheet.top >= -1 && sheet.bottom <= 430 - 21 + 1, `日期弹层让出主屏指示条 ${JSON.stringify(sheet)}`);
+  assert.ok(sheet.dayHeight >= 44 && sheet.dayTop >= sheet.top - 1 && sheet.dayBottom <= sheet.bottom + 1, '月末日期可以滚进弹层');
+  assert.ok(sheet.todayHeight >= 44 && sheet.todayTop >= sheet.top - 1 && sheet.todayBottom <= sheet.bottom + 1, '今天按钮保持可点');
+
+  // 模拟软键盘既缩小又向下平移可视区；不把桌面模拟当作 Safari 真机。
+  await b.evaluate(`(() => {
+    document.querySelector('dialog[open] .calendar-control input').focus();
+    Object.defineProperties(visualViewport, {
+      height: { configurable: true, value: 278 },
+      offsetTop: { configurable: true, value: 72 }
+    });
+    visualViewport.dispatchEvent(new Event('resize'));
+    visualViewport.dispatchEvent(new Event('scroll'));
+  })()`);
+  await sleep(100);
+  const keyboard = await b.evaluate(`(() => {
+    const dialog = document.querySelector('dialog[open]');
+    const box = dialog.getBoundingClientRect();
+    const visible = el => {
+      const rect = el.getBoundingClientRect();
+      return rect.top >= visualViewport.offsetTop - 1 &&
+        rect.bottom <= visualViewport.offsetTop + visualViewport.height + 1 &&
+        el.contains(document.elementFromPoint(rect.x + rect.width/2, rect.y + rect.height/2));
+    };
+    const input = dialog.querySelector('.calendar-control input');
+    return { top: box.top, bottom: box.bottom, input: visible(input),
+      focus: document.activeElement === input, close: visible(dialog.querySelector('.dialog-close')) };
+  })()`);
+  assert.ok(keyboard.top >= 72 && keyboard.bottom <= 72 + 278 - 21 + 1, JSON.stringify(keyboard));
+  assert.ok(keyboard.input && keyboard.focus && keyboard.close, JSON.stringify(keyboard));
+
+  await b.evaluate(`delete visualViewport.height; delete visualViewport.offsetTop; visualViewport.dispatchEvent(new Event('resize'));`);
+  await sleep(100);
+  assert.ok(Math.abs(await b.evaluate("document.querySelector('dialog[open]').getBoundingClientRect().top") - sheet.top) <= 1);
+
+  await b.send('Emulation.setEmulatedMedia', { features: [
+    { name: 'prefers-reduced-motion', value: 'reduce' },
+    { name: 'prefers-reduced-transparency', value: 'reduce' }
+  ] });
+  const reduced = await b.evaluate(`(() => {
+    const dialog = document.querySelector('dialog[open]');
+    const backdrop = getComputedStyle(dialog, '::backdrop');
+    return { dialog: getComputedStyle(dialog).animationName, backdrop: backdrop.animationName,
+      topbar: getComputedStyle(document.querySelector('.replay-topbar')).backgroundColor,
+      panel: getComputedStyle(document.getElementById('replay-control-panel')).backgroundColor };
+  })()`);
+  assert.equal(reduced.dialog, 'none');
+  assert.equal(reduced.backdrop, 'none');
+  assert.equal(reduced.topbar, reduced.panel);
+  assert.match(reduced.topbar, /^rgb\(/);
+  await b.evaluate(`document.querySelector('dialog[open] .dialog-close').click()`);
+  await sleep(50);
+  assert.equal(await b.evaluate("document.querySelector('dialog[open]') === null && document.activeElement.id === 'playback-context'"), true);
+  assert.equal(await b.evaluate(`document.getElementById('selection-help').textContent`), '先标记入点，再标记出点。');
+});
+
+test('short desktop settings scroll to the cover save control and the top nav honors reduced transparency', { skip: needChrome, timeout: CASE_TIMEOUT }, async t => {
+  const res = createResources(); t.after(() => res.closeAll());
+  const server = await startFixture(res), b = await launch(res);
+  await b.send('Page.enable'); await b.send('Runtime.enable');
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 640, deviceScaleFactor: 1, mobile: false });
+  await b.send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/?fixture=normal#settings` });
+  for (let i = 0; i < 100 && await b.evaluate(`document.body?.dataset.view`) !== 'settings'; i++) await sleep(100);
+  await b.evaluate(`document.querySelector('.side-nav button[data-view="settings"]').click(); document.getElementById('settings-open-bilibili').click()`);
+  await sleep(200);
+  const before = await b.evaluate(`(() => {
+    const main = document.querySelector('.workspace-main');
+    const save = document.getElementById('cover-save');
+    const mainBox = main.getBoundingClientRect(), saveBox = save.getBoundingClientRect();
+    return { scroll: main.scrollHeight > main.clientHeight + 8, hidden: saveBox.bottom > mainBox.bottom + 1, page: document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1 };
+  })()`);
+  assert.equal(before.scroll, true, '设置工作区必须能滚动');
+  assert.equal(before.hidden, true, '保存按钮起初在可视区下方');
+  assert.equal(before.page, true, '滚动发生在设置工作区，而不是整页');
+  const wheelAt = await b.evaluate(`(() => { const r = document.querySelector('.settings-desktop-detail').getBoundingClientRect(); return { x: r.x + r.width / 2, y: Math.min(r.bottom, innerHeight) - 40 }; })()`);
+  for (let i = 0; i < 8 && await b.evaluate(`document.querySelector('.workspace-main').scrollTop < 40`); i++) {
+    await b.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wheelAt.x, y: wheelAt.y, deltaX: 0, deltaY: 240 });
+    await sleep(40);
+  }
+  assert.ok(await b.evaluate(`document.querySelector('.workspace-main').scrollTop > 40`), '滚轮滚动设置工作区');
+  await b.evaluate(`document.querySelector('.workspace-main').scrollTop = 0`);
+  await b.evaluate(`(() => {const c=document.createElement('canvas');c.width=c.height=2;const bytes=Uint8Array.from(atob(c.toDataURL('image/png').split(',')[1]),x=>x.charCodeAt(0));const transfer=new DataTransfer();transfer.items.add(new File([bytes],'synthetic.png',{type:'image/png'}));const input=document.getElementById('bili-cover-file');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  for (let i = 0; i < 40 && await b.evaluate(`document.getElementById('cover-save').disabled`); i++) await sleep(50);
+  await b.evaluate(`document.getElementById('cover-save').focus()`);
+  await sleep(100);
+  const reached = await b.evaluate(`(() => {
+    const main = document.querySelector('.workspace-main');
+    const save = document.getElementById('cover-save');
+    const box = save.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return { focus: document.activeElement === save, scroll: main.scrollTop > 40, hit: save.contains(hit), top: box.top, bottom: box.bottom, view: main.getBoundingClientRect().bottom };
+  })()`);
+  assert.equal(reached.focus, true);
+  assert.equal(reached.scroll, true, JSON.stringify(reached));
+  assert.equal(reached.hit, true, JSON.stringify(reached));
+  assert.ok(reached.bottom <= reached.view + 1, JSON.stringify(reached));
+  await b.evaluate(`document.getElementById('cover-save').click()`);
+  await sleep(100);
+  assert.match(await b.evaluate(`document.getElementById('cover-message').textContent`), /正在保存封面|封面/);
+  await b.evaluate(`document.querySelector('.side-nav button[data-view="replay"]').click()`);
+  await sleep(200);
+  const replay = await b.evaluate(`(() => {
+    const view = document.getElementById('view-replay');
+    const box = id => { const r = document.getElementById(id).getBoundingClientRect(); return r.bottom; };
+    return { scrolls: view.scrollHeight > view.clientHeight + 1, fit: getComputedStyle(document.getElementById('replay-player')).objectFit,
+      export: box('export-range'), timeline: box('timeline-overview'), play: box('transport-toggle'), height: innerHeight };
+  })()`);
+  assert.equal(replay.scrolls, false);
+  assert.equal(replay.fit, 'contain');
+  assert.ok(replay.export <= replay.height && replay.timeline <= replay.height && replay.play <= replay.height, JSON.stringify(replay));
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] });
+  await sleep(50);
+  const reduced = await b.evaluate(`(() => { const nav = getComputedStyle(document.querySelector('.side-nav')); return { background: nav.backgroundColor, filter: nav.backdropFilter || nav.webkitBackdropFilter }; })()`);
+  assert.equal(reduced.background, 'rgb(47, 52, 62)');
+  assert.equal(reduced.filter, 'none');
+  await b.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }] });
+  await sleep(50);
+  const glass = await b.evaluate(`(() => { const nav = getComputedStyle(document.querySelector('.side-nav')); return { background: nav.backgroundColor, filter: nav.backdropFilter || nav.webkitBackdropFilter }; })()`);
+  assert.equal(glass.background, 'rgba(186, 214, 247, 0.12)');
+  assert.match(glass.filter, /blur/);
+});
