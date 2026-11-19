@@ -30,6 +30,12 @@ function moov(timescale, duration, version = 0, prefix = Buffer.alloc(0)) {
   return box('moov', Buffer.concat([prefix, mvhd(timescale, duration, version)]));
 }
 
+function unknownVersionMvhd(version) {
+  const payload = Buffer.alloc(100);
+  payload[0] = version; payload.writeUInt32BE(1000, 12); payload.writeUInt32BE(42000, 16);
+  return box('mvhd', payload);
+}
+
 function withFile(buffer, run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mp4-duration-'));
   const file = path.join(directory, 'sample.mp4');
@@ -56,6 +62,14 @@ test('支持 64 位 box 尺寸和 mvhd v1，并跳过 mvhd 前的子 box', () =>
   withFile(Buffer.concat([ftyp, box('mdat', Buffer.alloc(1024), { large: true }), moov(1000, 3600500, 1, free)]), file => {
     assert.equal(readMp4DurationSeconds(file), 3600.5);
   });
+});
+
+test('未支持的 mvhd 版本返回 null，不按 v0 猜测 42 秒', () => {
+  for (const version of [2, 255]) {
+    withFile(Buffer.concat([ftyp, box('moov', unknownVersionMvhd(version))]), file => {
+      assert.equal(readMp4DurationSeconds(file), null);
+    });
+  }
 });
 
 test('损坏文件、未知 v0 时长和缺失 mvhd 返回 null 而不是假时长', () => {
