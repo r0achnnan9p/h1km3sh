@@ -78,8 +78,17 @@ function wallTime(ms, seconds = true) {
 function dateStart(date) { return new Date(`${date}T00:00:00+08:00`).getTime(); }
 function daySeconds(ms) { return Math.max(0, Math.min(86400, (ms - dateStart(state.date)) / 1000)); }
 function notify(message, isError = false, submission = null) {
-  const node = $('toast'); node.hidden = false; node.textContent = message; node.classList.toggle('error', isError); node.classList.add('show');
+  const node = $('toast');
+  if (typeof notify._cleanup === 'function') { notify._cleanup(); notify._cleanup = null; }
+  clearTimeout(toastTimer); toastTimer = null;
+  node.hidden = false; node.textContent = message; node.classList.toggle('error', isError); node.classList.add('show');
+  node.classList.remove('toast-paused');
   node.classList.toggle('submission-toast', Boolean(submission));
+  const hideNow = () => {
+    if (typeof notify._cleanup === 'function') { notify._cleanup(); notify._cleanup = null; }
+    clearTimeout(toastTimer); toastTimer = null;
+    node.classList.remove('show', 'toast-paused'); node.hidden = true;
+  };
   if (submission) {
     node.replaceChildren();
     const icon = document.createElement('span'); icon.className = 'toast-submission-icon'; icon.innerHTML = iconSvg(submission.icon || 'download') + iconSvg('check');
@@ -87,16 +96,56 @@ function notify(message, isError = false, submission = null) {
     const caption = document.createElement('span'); caption.textContent = message;
     const range = document.createElement('span'); range.className = 'mono'; range.textContent = submission.range;
     text.append(caption, range);
-    const arrow = document.createElement('button'); arrow.type = 'button'; arrow.className = 'toast-task-link'; setButtonIcon(arrow, 'chevron', '查看任务'); arrow.addEventListener('click', () => { clearTimeout(toastTimer); node.classList.remove('show'); node.hidden = true; openTaskPage(submission.kind); });
+    const arrow = document.createElement('button'); arrow.type = 'button'; arrow.className = 'toast-task-link'; setButtonIcon(arrow, 'chevron', '查看任务'); arrow.addEventListener('click', () => { hideNow(); openTaskPage(submission.kind); });
     const countdown = document.createElement('span'); countdown.className = 'toast-countdown'; countdown.setAttribute('aria-hidden', 'true');
     node.append(icon, text, arrow, countdown);
   }
-  // 隐藏后的操作不留在焦点与辅助技术树中；键盘操作或指针悬停期间不撤掉提示。
+  // 隐藏后的操作不留在焦点与辅助技术树中；指针悬停或键盘聚焦期间暂停剩余计时与进度条。
+  let remaining = submission ? 3000 : 3200;
+  let startedAt = 0, paused = false, hovered = false, focused = Boolean(node.contains?.(document.activeElement));
   const dismiss = () => {
-    if (node.contains?.(document.activeElement) || node.matches?.(':hover')) { toastTimer = setTimeout(dismiss, 1000); return; }
-    node.classList.remove('show'); node.hidden = true;
+    if (hovered || focused || node.contains?.(document.activeElement) || node.matches?.(':hover')) {
+      pause(); return;
+    }
+    hideNow();
   };
-  clearTimeout(toastTimer); toastTimer = setTimeout(dismiss, submission ? 3000 : 3200);
+  const schedule = () => {
+    clearTimeout(toastTimer);
+    if (paused || node.hidden) return;
+    startedAt = Date.now();
+    toastTimer = setTimeout(dismiss, Math.max(0, remaining));
+  };
+  const pause = () => {
+    if (paused) return;
+    paused = true;
+    clearTimeout(toastTimer); toastTimer = null;
+    if (startedAt) remaining = Math.max(0, remaining - (Date.now() - startedAt));
+    node.classList.add('toast-paused');
+  };
+  const resume = () => {
+    if (!paused || hovered || focused) return;
+    paused = false;
+    node.classList.remove('toast-paused');
+    schedule();
+  };
+  const onEnter = () => { hovered = true; pause(); };
+  const onLeave = () => { hovered = false; resume(); };
+  const onFocusIn = () => { focused = true; pause(); };
+  const onFocusOut = event => {
+    const next = event?.relatedTarget;
+    focused = Boolean(next && node.contains?.(next));
+    if (!focused) resume();
+  };
+  const listeners = [
+    ['pointerenter', onEnter], ['pointerleave', onLeave],
+    ['focusin', onFocusIn], ['focusout', onFocusOut],
+  ];
+  for (const [type, handler] of listeners) node.addEventListener?.(type, handler);
+  notify._cleanup = () => {
+    for (const [type, handler] of listeners) node.removeEventListener?.(type, handler);
+  };
+  if (focused || node.matches?.(':hover')) { hovered = Boolean(node.matches?.(':hover')); pause(); }
+  else schedule();
 }
 async function api(url, options = {}) {
   const response = await fetch(appPath(url), { credentials: 'same-origin', cache: 'no-store', ...options,
@@ -299,8 +348,11 @@ function setupReplayControls() {
   view.addEventListener('pointerdown', event => { if (controller.pointerDown(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
   for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, event => { if (controller.pointerUp(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
   view.addEventListener('click', event => { if (controller.consumeClick(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
-  // 普通态单击画面切换播放/暂停并展示居中反馈，双击平滑进出沉浸全屏。
-  let tapHudTimer = null, lastSurfaceTapAt = 0;
+  // 普通态先区分单击与双击再提交媒体动作：单击切换播放/暂停并展示居中反馈，双击只进出沉浸全屏。
+  let tapHudTimer = null, pendingSurfaceTapTimer = null;
+  const cancelPendingSurfaceTap = () => {
+    clearTimeout(pendingSurfaceTapTimer); pendingSurfaceTapTimer = null;
+  };
   const hidePlaybackTapHud = () => {
     const hud = $('playback-tap-hud'); if (!hud) return;
     clearTimeout(tapHudTimer); tapHudTimer = null;
@@ -318,23 +370,32 @@ function setupReplayControls() {
   };
   $('player-wrap')?.addEventListener('click', event => {
     if (event.defaultPrevented || isOverlayMode() || !isPlaybackSurface(event.target)) return;
-    if (event.detail !== 1 || activeDialog?.open || state.dragging || state.holdSeek) return;
+    if (activeDialog?.open || state.dragging || state.holdSeek) { cancelPendingSurfaceTap(); return; }
+    if (event.detail >= 2) { cancelPendingSurfaceTap(); return; }
+    if (event.detail !== 1) return;
     const video = $('replay-player');
     if (!video || video.hidden) return;
-    const willPlay = video.paused || video.ended;
-    lastSurfaceTapAt = Date.now();
-    showPlaybackTapHud(willPlay ? 'play' : 'pause');
-    void toggleReplayPlayback();
+    cancelPendingSurfaceTap();
+    pendingSurfaceTapTimer = setTimeout(() => {
+      pendingSurfaceTapTimer = null;
+      if (isOverlayMode() || activeDialog?.open || state.dragging || state.holdSeek || document.body.dataset.view !== 'replay') return;
+      const currentVideo = $('replay-player');
+      if (!currentVideo || currentVideo.hidden) return;
+      const willPlay = currentVideo.paused || currentVideo.ended;
+      showPlaybackTapHud(willPlay ? 'play' : 'pause');
+      void toggleReplayPlayback();
+    }, 280);
   });
   $('player-wrap')?.addEventListener('dblclick', event => {
     if (event.defaultPrevented || !isPlaybackSurface(event.target) || activeDialog?.open) return;
-    const video = $('replay-player');
-    if (video && !video.hidden && !isOverlayMode() && Date.now() - lastSurfaceTapAt < 400) {
-      hidePlaybackTapHud();
-      void toggleReplayPlayback();
-    }
+    cancelPendingSurfaceTap();
+    hidePlaybackTapHud();
     $('replay-fullscreen')?.click();
   });
+  for (const id of ['date-select', 'playback-source', 'camera-select', 'dvr-select', 'dvr-channel']) $(id)?.addEventListener('change', cancelPendingSurfaceTap, true);
+  window.addEventListener('blur', cancelPendingSurfaceTap);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) cancelPendingSurfaceTap(); });
+  controller.cancelSurfaceTap = cancelPendingSurfaceTap;
   view.addEventListener('pointermove', event => controller.pointerMove(event), { passive: true });
   view.addEventListener('contextmenu', () => controller.reset());
   document.addEventListener('focusin', event => {
@@ -783,6 +844,7 @@ function updateSelection() {
 }
 function clearReplay() {
   cancelReplayHold();
+  if (typeof replayControls !== 'undefined') replayControls?.cancelSurfaceTap?.();
   if (typeof hideSeekHud === 'function') hideSeekHud(true);
   // A pressed ruler may not have crossed the movement threshold yet. Cancel
   // its captured pointer and released-but-pending commit before clearing media.
@@ -1259,10 +1321,12 @@ function stepReplay(seconds) {
   if (!state.date || !state.segments.length) return;
   syncPlaybackCursor();
   const video = $('replay-player'), autoplay = !video.hidden && (!video.paused || state.playbackAutoplay === true && !state.followPlayback);
-  const day = dateStart(state.date), current = state.cursorMs ?? day;
-  const next = Math.max(day, Math.min(timelineLimit(), day + 86_399_000, Math.round(current / 1000) * 1000 + seconds * 1000));
+  const day = dateStart(state.date), maxMs = Math.min(timelineLimit(), day + 86_399_000), current = state.cursorMs ?? day;
+  const base = Math.max(day, Math.min(maxMs, Math.round(current / 1000) * 1000));
+  const next = Math.max(day, Math.min(maxMs, base + seconds * 1000));
+  const actualSeconds = Math.round((next - base) / 1000);
   showScrubTime(next, `${seconds < 0 ? '后退' : '前进'} ${Math.abs(seconds)} 秒`); fadeScrubTime();
-  if (typeof showSeekHud === 'function') showSeekHud(seconds, { accumulate: true });
+  if (actualSeconds !== 0 && typeof showSeekHud === 'function') showSeekHud(actualSeconds, { accumulate: true });
   if (tryBufferedReplaySeek(next, autoplay)) return;
   Promise.resolve(jumpToTimelineTime(next, 'detail', { autoplay })).catch(error => setPlaybackNotice(error.message, true));
 }
@@ -1272,8 +1336,10 @@ function beginReplayHold() {
   state.lastFramePending = null;
   if (state.previewMode === 'last-frame') state.previewMode = 'replay';
   const video = $('replay-player');
+  const day = dateStart(state.date), maxMs = Math.min(timelineLimit(), day + 86_399_000);
+  const startMs = Math.max(day, Math.min(maxMs, Math.round((state.cursorMs ?? day) / 1000) * 1000));
   const hold = { context: playbackContextKey(), requestId: state.playRequestId,
-    cursorMs: state.cursorMs, timelineStartMs: state.timelineStartMs, targetMs: state.cursorMs ?? dateStart(state.date),
+    cursorMs: state.cursorMs, timelineStartMs: state.timelineStartMs, targetMs: startMs,
     deltaSeconds: 0,
     autoplay: !video.hidden && (!video.paused || state.playbackAutoplay === true && !state.followPlayback) };
   state.holdSeek = hold;
@@ -1282,13 +1348,17 @@ function beginReplayHold() {
 function repeatReplayHold(hold, seconds) {
   if (!hold || state.holdSeek !== hold) return;
   if (hold.context !== playbackContextKey() || hold.requestId !== state.playRequestId) { cancelReplayHold(); return; }
-  const day = dateStart(state.date);
-  hold.targetMs = Math.max(day, Math.min(timelineLimit(), day + 86_399_000, Math.round(hold.targetMs / 1000) * 1000 + seconds * 1000));
-  hold.deltaSeconds = (hold.deltaSeconds || 0) + seconds;
+  const day = dateStart(state.date), maxMs = Math.min(timelineLimit(), day + 86_399_000);
+  const prevMs = Math.max(day, Math.min(maxMs, Math.round(hold.targetMs / 1000) * 1000));
+  hold.targetMs = Math.max(day, Math.min(maxMs, prevMs + seconds * 1000));
+  const actualSeconds = Math.round((hold.targetMs - prevMs) / 1000);
   state.cursorMs = hold.targetMs;
   setTimelineWindow(hold.targetMs);
   showScrubTime(hold.targetMs, seconds < 0 ? '连续后退' : '连续前进');
-  if (typeof showSeekHud === 'function') showSeekHud(hold.deltaSeconds, { hold: true });
+  if (actualSeconds !== 0) {
+    hold.deltaSeconds = (hold.deltaSeconds || 0) + actualSeconds;
+    if (typeof showSeekHud === 'function') showSeekHud(hold.deltaSeconds, { hold: true });
+  }
 }
 function commitReplayHold(hold) {
   if (!hold || state.holdSeek !== hold) return;

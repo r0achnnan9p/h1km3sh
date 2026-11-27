@@ -725,7 +725,7 @@ body { background: var(--app-background); background-attachment: fixed; }
 .toast-submission-copy .mono { font-size: 11px; }
 .toast-task-link { width: 48px; height: 48px; flex-shrink: 0; border: 0; border-radius: var(--radius-card); background: rgba(255,255,255,.08); color: var(--accent); }
 .submission-toast .toast-countdown { content: ''; position: absolute; bottom: 0; left: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; animation: toast-countdown 3s linear forwards; }
-.submission-toast:is(:hover, :focus-within) .toast-countdown { animation-play-state: paused; }
+.submission-toast:is(.toast-paused, :hover, :focus-within) .toast-countdown { animation-play-state: paused; }
 @keyframes toast-countdown { to { transform: scaleX(0); } }
 .view.replay-expanded { position: fixed; inset: 0; z-index: 80; background: var(--bg); overflow: auto; padding: max(12px,var(--safe-top)) max(12px,var(--safe-right)) max(12px,var(--safe-bottom)) max(12px,var(--safe-left)); }
 @media (max-width: 760px) { .selection-panel { display: grid; } .timeline-header { justify-content: center; } .selection-help { grid-column: 1/-1; } }
