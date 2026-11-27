@@ -192,11 +192,36 @@ test('P1: 双击普通态画面只进入沉浸全屏，不触发播放/暂停与
   assert.equal(toggles, 0, '暂停态双击不能误启动播放');
   assert.equal(video.paused, true);
 
-  // 3) 单击画面：经过区分窗口后正常切换播放/暂停并展示居中反馈
+  // 3) 280ms 之外（350ms）收到浏览器派发的 click(detail=2) + dblclick：不误进全屏，按两次独立单击处理
+  video.paused = false;
   wrap.emit('click', { target: video, detail: 1 });
-  assert.equal(toggles, 0, '单击在确认窗口前暂不提交');
+  clock.advance(350); // 超过 280ms，首击已提交暂停
+  assert.equal(toggles, 1);
+  assert.equal(video.paused, true);
+  wrap.emit('click', { target: video, detail: 2 });
+  wrap.emit('dblclick', { target: video, detail: 2 });
+  assert.equal(fullscreenClicks, 2, '超窗后的原生 dblclick 不能在已提交单击后再进入全屏');
   clock.advance(280);
-  assert.equal(toggles, 1, '单击在确认窗口后提交一次播放/暂停');
+  assert.equal(toggles, 2, '第二击作为新的独立单击恢复播放');
+  assert.equal(video.paused, false);
+
+  // 暂停初始态同样在 350ms 慢双击下不误进全屏
+  video.paused = true;
+  wrap.emit('click', { target: video, detail: 1 });
+  clock.advance(350);
+  assert.equal(video.paused, false);
+  wrap.emit('click', { target: video, detail: 2 });
+  wrap.emit('dblclick', { target: video, detail: 2 });
+  assert.equal(fullscreenClicks, 2, '暂停态超窗慢双击也不能再触发全屏');
+  clock.advance(280);
+  assert.equal(video.paused, true);
+
+  // 4) 正常单击画面：经过区分窗口后正常切换播放/暂停并展示居中反馈
+  const prevToggles = toggles;
+  wrap.emit('click', { target: video, detail: 1 });
+  assert.equal(toggles, prevToggles, '单击在确认窗口前暂不提交');
+  clock.advance(280);
+  assert.equal(toggles, prevToggles + 1, '单击在确认窗口后提交一次播放/暂停');
   assert.equal(nodes.get('playback-tap-hud').hidden, false);
   assert.equal(video.paused, false);
   clock.advance(500);

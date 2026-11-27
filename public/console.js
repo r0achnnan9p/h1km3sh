@@ -348,7 +348,7 @@ function setupReplayControls() {
   view.addEventListener('pointerdown', event => { if (controller.pointerDown(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
   for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, event => { if (controller.pointerUp(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
   view.addEventListener('click', event => { if (controller.consumeClick(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
-  // 普通态先区分单击与双击再提交媒体动作：单击切换播放/暂停并展示居中反馈，双击只进出沉浸全屏。
+  // 普通态用同一套 280ms 窗口区分单击与双击：窗口内第二击只进沉浸全屏（零媒体副作用），超窗则按独立单击处理。
   let tapHudTimer = null, pendingSurfaceTapTimer = null;
   const cancelPendingSurfaceTap = () => {
     clearTimeout(pendingSurfaceTapTimer); pendingSurfaceTapTimer = null;
@@ -371,11 +371,15 @@ function setupReplayControls() {
   $('player-wrap')?.addEventListener('click', event => {
     if (event.defaultPrevented || isOverlayMode() || !isPlaybackSurface(event.target)) return;
     if (activeDialog?.open || state.dragging || state.holdSeek) { cancelPendingSurfaceTap(); return; }
-    if (event.detail >= 2) { cancelPendingSurfaceTap(); return; }
-    if (event.detail !== 1) return;
+    if (event.detail < 1) return;
     const video = $('replay-player');
     if (!video || video.hidden) return;
-    cancelPendingSurfaceTap();
+    if (pendingSurfaceTapTimer !== null) {
+      cancelPendingSurfaceTap();
+      hidePlaybackTapHud();
+      $('replay-fullscreen')?.click();
+      return;
+    }
     pendingSurfaceTapTimer = setTimeout(() => {
       pendingSurfaceTapTimer = null;
       if (isOverlayMode() || activeDialog?.open || state.dragging || state.holdSeek || document.body.dataset.view !== 'replay') return;
@@ -385,12 +389,6 @@ function setupReplayControls() {
       showPlaybackTapHud(willPlay ? 'play' : 'pause');
       void toggleReplayPlayback();
     }, 280);
-  });
-  $('player-wrap')?.addEventListener('dblclick', event => {
-    if (event.defaultPrevented || !isPlaybackSurface(event.target) || activeDialog?.open) return;
-    cancelPendingSurfaceTap();
-    hidePlaybackTapHud();
-    $('replay-fullscreen')?.click();
   });
   for (const id of ['date-select', 'playback-source', 'camera-select', 'dvr-select', 'dvr-channel']) $(id)?.addEventListener('change', cancelPendingSurfaceTap, true);
   window.addEventListener('blur', cancelPendingSurfaceTap);
