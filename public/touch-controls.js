@@ -100,18 +100,35 @@ export function openDialog(title, description = '', { trackChanges = true, initi
   // Only a deliberate pull on the title area dismisses a phone sheet. Scrolling
   // the form never dismisses it, and repeated pulls never discard a draft.
   let pull = null;
+  const resetPullVisual = () => {
+    delete dialog.dataset.sheetDragging;
+    dialog.style.removeProperty('--sheet-drag-y');
+  };
   head.addEventListener('pointerdown', event => {
     if (event.pointerType !== 'touch' || !event.isPrimary || closeButton.contains(event.target) || !window.matchMedia('(max-width: 600px)').matches) return;
     pull = { id: event.pointerId, x: event.clientX, y: event.clientY };
     head.setPointerCapture(event.pointerId);
   });
+  head.addEventListener('pointermove', event => {
+    if (pull?.id !== event.pointerId) return;
+    const dy = event.clientY - pull.y, dx = Math.abs(event.clientX - pull.x);
+    if (dy > 4 && dy > dx) {
+      dialog.dataset.sheetDragging = 'true';
+      const offset = dy <= 120 ? dy : 120 + (dy - 120) * 0.35;
+      dialog.style.setProperty('--sheet-drag-y', `${Math.round(offset)}px`);
+    } else if (dy <= 0 && dialog.dataset.sheetDragging) {
+      dialog.style.setProperty('--sheet-drag-y', '0px');
+    }
+  });
   head.addEventListener('pointerup', event => {
     if (pull?.id !== event.pointerId) return;
     const vertical = event.clientY - pull.y, horizontal = Math.abs(event.clientX - pull.x);
     pull = null;
+    resetPullVisual();
     if (vertical >= 64 && vertical > horizontal * 2) requestDismissal();
   });
-  head.addEventListener('lostpointercapture', () => { pull = null; });
+  head.addEventListener('pointercancel', () => { pull = null; resetPullVisual(); });
+  head.addEventListener('lostpointercapture', () => { pull = null; resetPullVisual(); });
   dialog.addEventListener('cancel', event => { if (event.target !== dialog) return; event.preventDefault(); requestDismissal(); });
   const releaseBackground = lockDialogBackground(dialog);
   const detachViewport = fitDialogViewport(dialog);

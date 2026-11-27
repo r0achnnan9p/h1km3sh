@@ -91,9 +91,9 @@ function notify(message, isError = false, submission = null) {
     const countdown = document.createElement('span'); countdown.className = 'toast-countdown'; countdown.setAttribute('aria-hidden', 'true');
     node.append(icon, text, arrow, countdown);
   }
-  // 隐藏后的操作不留在焦点与辅助技术树中；键盘操作期间不撤掉提示。
+  // 隐藏后的操作不留在焦点与辅助技术树中；键盘操作或指针悬停期间不撤掉提示。
   const dismiss = () => {
-    if (node.contains?.(document.activeElement)) { toastTimer = setTimeout(dismiss, 1000); return; }
+    if (node.contains?.(document.activeElement) || node.matches?.(':hover')) { toastTimer = setTimeout(dismiss, 1000); return; }
     node.classList.remove('show'); node.hidden = true;
   };
   clearTimeout(toastTimer); toastTimer = setTimeout(dismiss, submission ? 3000 : 3200);
@@ -244,6 +244,7 @@ function navigate(view, updateHistory = true) {
     document.querySelectorAll('[data-view]').forEach(button => { button.classList.toggle('active', button.dataset.view === view); button.setAttribute('aria-current', button.dataset.view === view ? 'page' : 'false'); });
     if (changedView) { window.scrollTo(0, 0); const scrollRoot = document.querySelector('.workspace-main'); if (scrollRoot) scrollRoot.scrollTop = 0; }
     if (typeof slidingNavigation !== 'undefined') slidingNavigation?.sync();
+    if (typeof desktopSlidingNavigation !== 'undefined') desktopSlidingNavigation?.sync();
     if (typeof syncReplayControls === 'function') syncReplayControls();
     if (view === 'library') { outputFeed?.resume(); }
     if (view === 'library') refreshOutputs().catch(error => notify(error.message, true));
@@ -269,6 +270,7 @@ function navigate(view, updateHistory = true) {
 
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => navigate(button.dataset.view)));
 const slidingNavigation = createSlidingNavigation({ nav: document.querySelector('.mobile-nav'), activate: view => navigate(view) });
+const desktopSlidingNavigation = createSlidingNavigation({ nav: document.querySelector('.side-nav'), activate: view => navigate(view), drag: false });
 function setupReplayControls() {
   const view = $('view-replay'), panel = $('replay-control-panel'), topbar = view.querySelector('.replay-topbar');
   const applyVisibility = visible => {
@@ -290,11 +292,49 @@ function setupReplayControls() {
   });
   applyVisibility(controller.visible);
   const consume = event => { event.preventDefault(); event.stopImmediatePropagation(); };
+  const isOverlayMode = () => view.dataset.chromeOverlay === 'true';
   const isPlaybackSurface = target => target instanceof HTMLElement && $('player-wrap').contains(target)
     && !target.closest?.('button, a, input, textarea, select, [role="button"], [role="slider"], [contenteditable], dialog');
-  view.addEventListener('pointerdown', event => { if (controller.pointerDown(event, { surface: isPlaybackSurface(event.target) })) consume(event); }, true);
-  for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, event => { if (controller.pointerUp(event, { surface: isPlaybackSurface(event.target) })) consume(event); }, true);
-  view.addEventListener('click', event => { if (controller.consumeClick(event, { surface: isPlaybackSurface(event.target) })) consume(event); }, true);
+  const isOverlaySurface = target => isOverlayMode() && isPlaybackSurface(target);
+  view.addEventListener('pointerdown', event => { if (controller.pointerDown(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
+  for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, event => { if (controller.pointerUp(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
+  view.addEventListener('click', event => { if (controller.consumeClick(event, { surface: isOverlaySurface(event.target) })) consume(event); }, true);
+  // 普通态单击画面切换播放/暂停并展示居中反馈，双击平滑进出沉浸全屏。
+  let tapHudTimer = null, lastSurfaceTapAt = 0;
+  const hidePlaybackTapHud = () => {
+    const hud = $('playback-tap-hud'); if (!hud) return;
+    clearTimeout(tapHudTimer); tapHudTimer = null;
+    hud.classList.remove('active'); hud.hidden = true;
+  };
+  const showPlaybackTapHud = icon => {
+    const hud = $('playback-tap-hud'); if (!hud) return;
+    clearTimeout(tapHudTimer);
+    hud.innerHTML = iconSvg(icon);
+    hud.hidden = false;
+    hud.classList.remove('active');
+    void hud.offsetWidth;
+    hud.classList.add('active');
+    tapHudTimer = setTimeout(() => { hud.classList.remove('active'); hud.hidden = true; tapHudTimer = null; }, 460);
+  };
+  $('player-wrap')?.addEventListener('click', event => {
+    if (event.defaultPrevented || isOverlayMode() || !isPlaybackSurface(event.target)) return;
+    if (event.detail !== 1 || activeDialog?.open || state.dragging || state.holdSeek) return;
+    const video = $('replay-player');
+    if (!video || video.hidden) return;
+    const willPlay = video.paused || video.ended;
+    lastSurfaceTapAt = Date.now();
+    showPlaybackTapHud(willPlay ? 'play' : 'pause');
+    void toggleReplayPlayback();
+  });
+  $('player-wrap')?.addEventListener('dblclick', event => {
+    if (event.defaultPrevented || !isPlaybackSurface(event.target) || activeDialog?.open) return;
+    const video = $('replay-player');
+    if (video && !video.hidden && !isOverlayMode() && Date.now() - lastSurfaceTapAt < 400) {
+      hidePlaybackTapHud();
+      void toggleReplayPlayback();
+    }
+    $('replay-fullscreen')?.click();
+  });
   view.addEventListener('pointermove', event => controller.pointerMove(event), { passive: true });
   view.addEventListener('contextmenu', () => controller.reset());
   document.addEventListener('focusin', event => {
@@ -572,10 +612,15 @@ function setTimelineSpan(seconds) {
   syncTimelineZoomButtons();
 }
 function syncTimelineZoomButtons() {
-  document.querySelectorAll('[data-timeline-span]').forEach(button => {
+  let activeIndex = 0;
+  const spanButtons = [...document.querySelectorAll('[data-timeline-span]')];
+  spanButtons.forEach((button, index) => {
     const active = Number(button.dataset.timelineSpan) === state.timelineSpanSeconds;
+    if (active) activeIndex = index;
     button.setAttribute('aria-pressed', String(active)); button.classList.toggle('active', active);
   });
+  const switchHost = spanButtons[0]?.parentElement;
+  if (switchHost?.style) switchHost.style.setProperty('--seg-index', String(activeIndex));
 }
 function renderTimeline() {
   const timeline = $('timeline'); timeline.querySelectorAll('.segment').forEach(node => node.remove());
@@ -738,6 +783,7 @@ function updateSelection() {
 }
 function clearReplay() {
   cancelReplayHold();
+  if (typeof hideSeekHud === 'function') hideSeekHud(true);
   // A pressed ruler may not have crossed the movement threshold yet. Cancel
   // its captured pointer and released-but-pending commit before clearing media.
   interruptTimelineScrub();
@@ -1175,6 +1221,39 @@ function jumpToTimelineTime(ms, source = 'detail', options = {}) {
   debugMark('jump-no-recording', { ms });
   clearReplay(); setPlaybackNotice('这个时间点没有录像。', true);
 }
+let seekHudState = { direction: '', total: 0, timer: null, updatedAt: 0 };
+function hideSeekHud(immediate = false) {
+  const hud = $('seek-hud'); if (!hud) return;
+  clearTimeout(seekHudState.timer); seekHudState.timer = null;
+  seekHudState.direction = ''; seekHudState.total = 0;
+  hud.classList.remove('visible', 'pulse');
+  if (immediate) hud.hidden = true;
+  else seekHudState.timer = setTimeout(() => { if (!hud.classList.contains('visible')) hud.hidden = true; }, 220);
+}
+function fadeSeekHud(delay = 520) {
+  clearTimeout(seekHudState.timer);
+  seekHudState.timer = setTimeout(() => hideSeekHud(), delay);
+}
+function showSeekHud(deltaSeconds, { accumulate = false, hold = false } = {}) {
+  const hud = $('seek-hud'), icon = $('seek-hud-icon'), value = $('seek-hud-value');
+  if (!hud || !icon || !value || !deltaSeconds) return;
+  const direction = deltaSeconds < 0 ? 'back' : 'forward';
+  const now = Date.now();
+  const continueBurst = accumulate && seekHudState.direction === direction && (now - seekHudState.updatedAt) < 750;
+  const total = continueBurst ? seekHudState.total + deltaSeconds : deltaSeconds;
+  seekHudState.direction = direction;
+  seekHudState.total = total;
+  seekHudState.updatedAt = now;
+  clearTimeout(seekHudState.timer); seekHudState.timer = null;
+  hud.dataset.direction = direction;
+  icon.innerHTML = iconSvg(direction === 'back' ? 'skip-back' : 'skip-forward');
+  value.textContent = `${total > 0 ? '+' : ''}${total}s`;
+  hud.hidden = false;
+  hud.classList.remove('pulse');
+  void hud.offsetWidth;
+  hud.classList.add('visible', 'pulse');
+  if (!hold) seekHudState.timer = setTimeout(() => hideSeekHud(), 720);
+}
 function stepReplay(seconds) {
   if (state.previewMode === 'live') return;
   if (!state.date || !state.segments.length) return;
@@ -1183,6 +1262,7 @@ function stepReplay(seconds) {
   const day = dateStart(state.date), current = state.cursorMs ?? day;
   const next = Math.max(day, Math.min(timelineLimit(), day + 86_399_000, Math.round(current / 1000) * 1000 + seconds * 1000));
   showScrubTime(next, `${seconds < 0 ? '后退' : '前进'} ${Math.abs(seconds)} 秒`); fadeScrubTime();
+  if (typeof showSeekHud === 'function') showSeekHud(seconds, { accumulate: true });
   if (tryBufferedReplaySeek(next, autoplay)) return;
   Promise.resolve(jumpToTimelineTime(next, 'detail', { autoplay })).catch(error => setPlaybackNotice(error.message, true));
 }
@@ -1194,6 +1274,7 @@ function beginReplayHold() {
   const video = $('replay-player');
   const hold = { context: playbackContextKey(), requestId: state.playRequestId,
     cursorMs: state.cursorMs, timelineStartMs: state.timelineStartMs, targetMs: state.cursorMs ?? dateStart(state.date),
+    deltaSeconds: 0,
     autoplay: !video.hidden && (!video.paused || state.playbackAutoplay === true && !state.followPlayback) };
   state.holdSeek = hold;
   return hold;
@@ -1203,13 +1284,16 @@ function repeatReplayHold(hold, seconds) {
   if (hold.context !== playbackContextKey() || hold.requestId !== state.playRequestId) { cancelReplayHold(); return; }
   const day = dateStart(state.date);
   hold.targetMs = Math.max(day, Math.min(timelineLimit(), day + 86_399_000, Math.round(hold.targetMs / 1000) * 1000 + seconds * 1000));
+  hold.deltaSeconds = (hold.deltaSeconds || 0) + seconds;
   state.cursorMs = hold.targetMs;
   setTimelineWindow(hold.targetMs);
   showScrubTime(hold.targetMs, seconds < 0 ? '连续后退' : '连续前进');
+  if (typeof showSeekHud === 'function') showSeekHud(hold.deltaSeconds, { hold: true });
 }
 function commitReplayHold(hold) {
   if (!hold || state.holdSeek !== hold) return;
   state.holdSeek = null; fadeScrubTime();
+  if (typeof fadeSeekHud === 'function') fadeSeekHud(520);
   if (hold.context !== playbackContextKey() || hold.requestId !== state.playRequestId || document.body.dataset.view !== 'replay') return;
   if (tryBufferedReplaySeek(hold.targetMs, hold.autoplay)) return;
   Promise.resolve(jumpToTimelineTime(hold.targetMs, 'detail', { autoplay: hold.autoplay })).catch(error => setPlaybackNotice(error.message, true));
@@ -1221,6 +1305,7 @@ function abandonReplayHold(hold) {
     state.cursorMs = hold.cursorMs; state.timelineStartMs = hold.timelineStartMs; renderTimeline(); syncPlaybackCursor();
   }
   fadeScrubTime();
+  if (typeof hideSeekHud === 'function') hideSeekHud();
 }
 function cancelReplayHold() {
   for (const control of replayHoldButtons) control.cancel('playback-changed');
@@ -1359,7 +1444,15 @@ function markPlaybackBoundary(boundary) {
   const view = timelineWindow();
   if (point < view.start || point > view.end) setTimelineWindow(point);
   debugMark('mark-applied', { boundary, point });
-  $(`mark-${boundary}`).classList.add('active'); updateSelection();
+  const markButton = $(`mark-${boundary}`);
+  markButton.classList.add('active');
+  const markField = markButton.closest?.('.mark-field');
+  if (markField) {
+    markField.classList.remove('mark-pulse');
+    void markField.offsetWidth;
+    markField.classList.add('mark-pulse');
+  }
+  updateSelection();
 }
 $('mark-in').addEventListener('click', () => markPlaybackBoundary('in'));
 $('mark-out').addEventListener('click', () => markPlaybackBoundary('out'));
@@ -1748,6 +1841,8 @@ function selectTaskTab(upload, focus = false) {
     const button = $('task-tab-' + name); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1;
     $('task-' + name + '-panel').hidden = window.matchMedia?.('(min-width: 1024px)').matches ? false : !selected; if (selected && focus) button.focus();
   }
+  const tabHost = $('task-tab-export')?.parentElement;
+  if (tabHost?.dataset) tabHost.dataset.activeTab = upload ? 'upload' : 'export';
   if (window.matchMedia?.('(min-width: 1024px)').matches) { taskFeeds.exports.resume(); taskFeeds.uploads.resume(); }
   else (upload ? taskFeeds.uploads : taskFeeds.exports).resume();
   revealSubmittedTask();
@@ -2776,7 +2871,11 @@ function setupTouchControls() {
   document.querySelectorAll('input[type="password"]').forEach(input => { const wrapper = document.createElement('div'); wrapper.className = 'password-control'; input.before(wrapper); wrapper.append(input); const toggle = addButton(wrapper, '显示', '', () => { const visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; toggle.textContent = visible ? '隐藏' : '显示'; toggle.setAttribute('aria-pressed', String(visible)); }); toggle.setAttribute('aria-label', '显示或隐藏密码'); toggle.setAttribute('aria-pressed', 'false'); });
   updateOutputSort();
   $('timeline-time-editor').addEventListener('click', openPlaybackTimeEditor);
-  document.querySelectorAll('[data-app-reload]').forEach(button => button.addEventListener('click', reloadApplication));
+  document.querySelectorAll('[data-app-reload]').forEach(button => button.addEventListener('click', event => {
+    const icon = event.currentTarget?.querySelector?.('svg');
+    if (icon) { icon.classList.remove('spin-once'); void icon.getBoundingClientRect(); icon.classList.add('spin-once'); }
+    reloadApplication(event);
+  }));
   $('playback-context').addEventListener('click', openPlaybackDate);
   $('quick-source-select').addEventListener('change', changeQuickPlaybackSource);
   $('quick-source-select').addEventListener('focus', refreshPlaybackChoices);
