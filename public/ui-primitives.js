@@ -94,7 +94,8 @@ export function createPlaybackChrome({ container, video, interactionRoot = conta
   return { show, destroy() { cancel(); for (const detach of listeners) detach(); container.classList.remove('controls-idle'); } };
 }
 
-export function createSlidingNavigation({ nav, activate, window = globalThis.window, now = Date.now }) {
+export function createSlidingNavigation({ nav, activate, window = globalThis.window, now = Date.now, drag = true }) {
+  if (!nav) return { sync() {}, destroy() {} };
   const buttons = [...nav.querySelectorAll('button[data-view]')];
   let gesture = null, suppressUntil = 0;
   const listeners = [];
@@ -123,22 +124,24 @@ export function createSlidingNavigation({ nav, activate, window = globalThis.win
     gesture.target = hit(event); clearPreview(); nav.classList.add('nav-dragging');
     if (gesture.target) { gesture.target.classList.add('drag-target'); paint(gesture.target, event.clientX); }
   };
-  listen(nav, 'pointerdown', event => {
-    if (gesture || event.isPrimary === false || event.button !== 0 || !event.target.closest?.('button[data-view]')) return;
-    event.preventDefault(); gesture = { id: event.pointerId, target: null }; nav.setPointerCapture(event.pointerId); preview(event);
-  });
-  listen(nav, 'pointermove', event => { if (gesture?.id === event.pointerId) { event.preventDefault(); preview(event); } });
-  const finish = (event, cancelled) => {
-    if (gesture?.id !== event.pointerId) return;
-    const target = cancelled ? null : hit(event), id = gesture.id; gesture = null;
-    suppressUntil = now() + 600;
-    if (nav.hasPointerCapture?.(id)) nav.releasePointerCapture(id);
-    clearPreview(); if (target) activate(target.dataset.view); sync();
-  };
-  listen(nav, 'pointerup', event => finish(event, false));
-  listen(nav, 'pointercancel', event => finish(event, true));
-  listen(nav, 'lostpointercapture', event => finish(event, true));
-  listen(nav, 'click', event => { if (now() < suppressUntil && (event.detail > 0 || event.pointerType)) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+  if (drag) {
+    listen(nav, 'pointerdown', event => {
+      if (gesture || event.isPrimary === false || event.button !== 0 || !event.target.closest?.('button[data-view]')) return;
+      event.preventDefault(); gesture = { id: event.pointerId, target: null }; nav.setPointerCapture(event.pointerId); preview(event);
+    });
+    listen(nav, 'pointermove', event => { if (gesture?.id === event.pointerId) { event.preventDefault(); preview(event); } });
+    const finish = (event, cancelled) => {
+      if (gesture?.id !== event.pointerId) return;
+      const target = cancelled ? null : hit(event), id = gesture.id; gesture = null;
+      suppressUntil = now() + 600;
+      if (nav.hasPointerCapture?.(id)) nav.releasePointerCapture(id);
+      clearPreview(); if (target) activate(target.dataset.view); sync();
+    };
+    listen(nav, 'pointerup', event => finish(event, false));
+    listen(nav, 'pointercancel', event => finish(event, true));
+    listen(nav, 'lostpointercapture', event => finish(event, true));
+    listen(nav, 'click', event => { if (now() < suppressUntil && (event.detail > 0 || event.pointerType)) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+  }
   listen(window, 'resize', sync);
   sync();
   return { sync, destroy() { gesture = null; for (const detach of listeners) detach(); clearPreview(); nav.classList.remove('sliding-nav'); } };
